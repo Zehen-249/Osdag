@@ -1981,7 +1981,7 @@ class Window(QMainWindow):
                             if set(uiObj[key_str]) != set(n[1]()):
                                 key.setCurrentIndex(1)
                             else:
-                                key.setCurrentIndex(1)
+                                key.setCurrentIndex(0)
                             data[key_str + "_customized"] = uiObj[key_str]
 
             else:
