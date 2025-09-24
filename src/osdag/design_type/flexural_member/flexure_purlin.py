@@ -837,7 +837,7 @@ class Flexure_Purlin(Member):
         self.length = float(design_dictionary[KEY_LENGTH])
 
         # end condition
-        self.support = 'Supported'
+        self.support = KEY_DISP_SUPPORT3
 
         # factored loads
         self.load = Load(

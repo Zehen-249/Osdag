@@ -808,7 +808,7 @@ class Flexure(Member):
         self.length = float(design_dictionary[KEY_LENGTH])
 
         # end condition
-        self.support = design_dictionary[KEY_SUPPORT]
+        self.support = KEY_DISP_SUPPORT1
 
         # factored loads
         self.load = Load(
