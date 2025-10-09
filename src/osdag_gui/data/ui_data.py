@@ -85,7 +85,14 @@ class Data:
         "2D Frame": 
         [],
         "3D Frame": 
-        []
+        [],
+        # ----Plugins----
+        "Add-Ons": 
+        [
+            ("Foundation Designer", ":/vectors/IITB_logo.svg"),
+            ("Purlin Designer", ":/vectors/IITB_logo.svg"),
+            ("Steel Designer", ":/vectors/IITB_logo.svg"),
+        ]
     }
     
     NAVBAR_ICONS = {
@@ -98,6 +105,7 @@ class Data:
         "Truss": [":/vectors/nav_icons/truss.svg", ":/vectors/nav_icons/truss_dark.svg"],
         "2D Frame": [":/vectors/nav_icons/2d_frame.svg", ":/vectors/nav_icons/2d_frame_dark.svg"],
         "3D Frame": [":/vectors/nav_icons/3d_frame.svg", ":/vectors/nav_icons/3d_frame_dark.svg"],
+        "Add-Ons": [":/images/add_ons.png", ":/images/add_ons_clicked.png"]
         # "Group Design": [":/vectors/nav_icons/group_design.svg", ":/vectors/nav_icons/group_design_dark.svg"],
     }
 

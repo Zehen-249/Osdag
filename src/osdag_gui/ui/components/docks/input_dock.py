@@ -398,6 +398,7 @@ class InputDock(QWidget):
                         for change_key in onchange_key_popup[0][0]:
                             # print(f"[INFO] Change key: {change_key}")
                             arg_list.append(self.input_widget.findChild(QWidget, change_key).currentText())
+
                         self.data[t[0] + "_customized"] = [all_values_available for all_values_available in
                                                       t[1](arg_list) if all_values_available not in disabled_values]
                     else:

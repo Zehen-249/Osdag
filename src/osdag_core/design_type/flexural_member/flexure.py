@@ -366,7 +366,7 @@ class Flexure(Member):
             return VALUES_BENDING_TYPE
 
     # def show_error_message(self):
-    #     QMessageBox.about(self, 'information', "Your message!")
+    #     QMessageBox.about('information', "Your message!")
     def input_value_changed(self):
 
         lst = []
@@ -756,7 +756,7 @@ class Flexure(Member):
 
 
         if len(missing_fields_list) > 0:
-            error = self.generate_missing_fields_error_string(self, missing_fields_list)
+            error = self.generate_missing_fields_error_string(missing_fields_list)
             all_errors.append(error)
         else:
             flag = True
@@ -810,7 +810,7 @@ class Flexure(Member):
                 if self.lambda_lt < 0.4:
                     self.design_type == KEY_DISP_DESIGN_TYPE_FLEXURE
         '''
-        # super(Flexure, self).set_input_values(self, design_dictionary)
+        # super(Flexure, self).set_input_values( design_dictionary)
 
         # section properties
         self.module = design_dictionary[KEY_MODULE]
@@ -990,7 +990,7 @@ class Flexure(Member):
         # logger.info("")
         print("self.input_modified", self.input_modified)
 
-    def section_connect_database(self, section):
+    def section_connect_database(section):
         print(f"section_connect_database{section}")
         print(section)
         # print(self.sec_profile)
@@ -2101,7 +2101,7 @@ class Flexure(Member):
         # else:
         #     if self.optimization_parameter == "Utilization Ratio":
         #         self.common_result(
-        #             self,
+        #             
         #             list_result=self.optimum_section_ur_results,
         #             result_type=self.result_UR,
         #         )
@@ -2146,7 +2146,7 @@ class Flexure(Member):
         #
         #         # results
         #         self.common_result(
-        #             self,
+        #             
         #             list_result=self.optimum_section_cost_results,
         #             result_type=self.result_cost,
         #         )
@@ -2932,7 +2932,7 @@ class Flexure(Member):
             self.report_check.append(t1)
 #
     #     elif not self.design_status or len(self.failed_design_dict)>0:
-    #         self.section_property = self.section_connect_database(self, self.result_designation)
+    #         self.section_property = self.section_connect_database(self.result_designation)
 
     #         if self.sec_profile=='Columns' or self.sec_profile=='Beams' or self.sec_profile == VALUES_SECTYPE[1]:
     #             self.report_column = {KEY_DISP_SEC_PROFILE: "ISection",
