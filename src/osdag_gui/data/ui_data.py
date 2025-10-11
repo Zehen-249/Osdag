@@ -89,8 +89,6 @@ class Data:
         # ----Plugins----
         "Add-Ons": 
         [
-            ("Foundation Designer", ":/vectors/IITB_logo.svg"),
-            ("Purlin Designer", ":/vectors/IITB_logo.svg"),
             ("Steel Designer", ":/vectors/IITB_logo.svg"),
         ]
     }

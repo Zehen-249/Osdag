@@ -1,6 +1,9 @@
 from pathlib import Path
-import sys, shutil, json
-from dataclasses import dataclass
+import sys, shutil, json, site
+import importlib
+import importlib.metadata as metadata
+import pkgutil
+from dataclasses import dataclass, field
 from PySide6.QtWidgets import (
     QApplication, 
     QDialog, 
@@ -17,20 +20,23 @@ from PySide6.QtCore import Qt
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtGui import QIcon
 from osdag_gui.ui.components.dialogs.custom_titlebar import CustomTitleBar
+from osdag_gui.data.ui_data import Data
 
+active_plugins = Data.MODULES["Add-Ons"]
 @dataclass
 class PluginMetaData:      
     name: str
-    description: str = "No description available."
-    author: str = "Unknown"
-    version: str = "1.0"
-    status: str = "Inactive" 
+    description: str = field(default_factory=lambda: "No description available.")
+    authors: list = field(default_factory=lambda: [{"name": "Unknown"}])
+    version: str = field(default_factory=lambda: "1.0.0")
+    status: str = field(default_factory=lambda: "Inactive")
+    module: object = field(default=None)
+    entry_class: object = field(default=None)
 
 class StatusIndicator(QWidget):
     def __init__(self, status="Inactive"):
         super().__init__()
         self.status = status
-
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
@@ -150,18 +156,22 @@ class PluginWidget(QWidget):
         layout.addWidget(content)
 
         # --- Button Callbacks ---
-        self.btnActivate.clicked.connect(self.on_activate)
-        self.btnDeactivate.clicked.connect(self.on_deactivate)
-        self.btnRemove.clicked.connect(self.on_remove)
+        self.btnActivate.clicked.connect(lambda checked=False: self.on_activate(plugin))
+        self.btnDeactivate.clicked.connect(lambda checked=False: self.on_deactivate(plugin))
+        self.btnRemove.clicked.connect(lambda checked=False: self.on_remove(plugin))
 
         content_min_width = self.content.sizeHint().width() + 150 
         self.setMinimumWidth(content_min_width)
 
-    def on_activate(self):
+    def on_activate(self, plugin:PluginMetaData):
+        active_plugins.append((f"{self.plugin.name}" ,":/vectors/IITB_logo.svg"))
         self.plugin.status = "Active"
         self.status_indicator.update_status(self.plugin.status)
 
-    def on_deactivate(self):
+    def on_deactivate(self, plugin:PluginMetaData):
+        active_plugins[:] = [
+            p for p in active_plugins if p[0] != self.plugin.name
+        ]
         self.plugin.status = "Inactive"
         self.status_indicator.update_status(self.plugin.status)
 
@@ -225,6 +235,7 @@ class PluginManagerDialog(QDialog):
 
         # Add plugins
         plugins = self._load_installed_plugins()
+        print(plugins)
         for plugin in plugins:
             pw = PluginWidget(plugin)
             pw.setFixedHeight(120)
@@ -251,13 +262,101 @@ class PluginManagerDialog(QDialog):
 
 
     def _load_installed_plugins(self) -> list[PluginMetaData]:
-        return [
-            PluginMetaData(name="Sample Plugin 1", description="This is a sample plugin.", author="Author A", version="1.0", status="Active"),
-            PluginMetaData(name="Sample Plugin 2", description="Another example plugin.", author="Author B", version="1.2", status="Inactive"),
-            PluginMetaData(name="Sample Plugin 3", description="Yet another plugin example.", author="Author C", version="0.9", status="Inactive"),
-            PluginMetaData(name="Sample Plugin 4", description="Yet another plugin example.", author="Author D", version="0.9", status="Inactive"),
-        ]
+        plugins: list[PluginMetaData] = []
+        development_plugins_path = Path(__file__).resolve().parent.parent.parent.parent.parent / "plugins"
+        try:
+            entry_points = metadata.entry_points().select(group="osdag.plugins")
+            print(entry_points)
+            for ep in entry_points:
+                module = ep.load()
+                print(f"Loaded module: {module}")
+                if not getattr(module, "IS_OSDAG_PLUGIN", False):
+                    print(f"[WARN] Module {ep.name} is not marked as an Osdag plugin.")
+                    continue
+                meta = getattr(module, "META", {})
+                name = meta.get("name")
+                if name is None:
+                    print(f"[WARN] Plugin {ep.name} missing 'name' in META.")
+                    continue
+                description = meta.get("description", "No description available.")
+                authors = meta.get("authors", [{"name": "Unknown"}])
+                version = meta.get("version", "1.0")
+                entry_class = self._resolve_entry_class(module, name, getattr(module, "ENTRY_POINT", None))
+                print(entry_class)
+                if entry_class is None:
+                    print(f"[WARN] Failed to resolve entry class for plugin '{name}' (site-packages).")
+                    continue
+                plugins.append(
+                    PluginMetaData(
+                        name=name,
+                        description=description,
+                        authors=authors,
+                        version=version,
+                        module=module,
+                        entry_class=entry_class,
+                    )
+                )
+        except Exception as e:
+            print(f"[WARN] Entry point loading failed: {e}")
+
+        if development_plugins_path.exists():
+            for _, name, ispkg in pkgutil.iter_modules([str(development_plugins_path)]):
+                existing_names = {p.name for p in plugins}
+                if name in existing_names:
+                    continue
+                if not ispkg:
+                    continue
+                try:
+                    module = importlib.import_module(f"plugins.{name}")
+                    if not getattr(module, "IS_OSDAG_PLUGIN", False):
+                        continue
+                    
+                    meta = getattr(module, "META", {})
+                    name = meta.get("name")
+                    if name is None:
+                        print(f"[WARN] Plugin {ep.name} in development missing 'name' in META.")
+                        continue
+                    description = meta.get("description", "No description available.")
+                    authors = meta.get("authors", [{"name": "Unknown"}])
+                    version = meta.get("version", "1.0")
+                    entry_class = self._resolve_entry_class(module, name, getattr(module, "ENTRY_POINT", None))
+                    if entry_class is None:
+                        print(f"[WARN] Failed to resolve entry class for plugin '{name}' (development).")
+                        continue
+
+                    plugins.append(
+                        PluginMetaData(
+                            name=name,
+                            description=description,
+                            authors=authors,
+                            version=version,
+                            module=module,
+                            entry_class=entry_class,
+                        )
+                    )
+                except Exception as e:
+                    print(f"[WARN] Skipped {name}: {e}")
+        print(plugins)
+        return plugins
     
+    def _resolve_entry_class(self, module, name, entry_path: str):
+
+        if not entry_path:
+            print(f"[WARN] Plugin '{name}' missing 'PLUGIN_ENTRY'.")
+            return None
+
+
+        try:
+            parts = entry_path.split(".")
+            submodule_name = ".".join(parts[:-1])
+            class_name = parts[-1]
+            entry_module = importlib.import_module(f"{module.__name__}.{submodule_name}")
+            entry_class = getattr(entry_module, class_name)
+            return entry_class
+
+        except Exception as e:
+            print(f"[WARN] Could not resolve entry class '{entry_path}' for plugin '{name}': {e}")
+            return None
 
 # Test the dialog
 if __name__ == "__main__":
