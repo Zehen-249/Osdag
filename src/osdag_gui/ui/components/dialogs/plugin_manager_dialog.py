@@ -1,9 +1,3 @@
-from pathlib import Path
-import sys, shutil, json, site
-import importlib
-import importlib.metadata as metadata
-import pkgutil
-from dataclasses import dataclass, field
 from PySide6.QtWidgets import (
     QApplication, 
     QDialog, 
@@ -16,58 +10,50 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QScrollArea
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt , Signal, Slot
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtGui import QIcon
 from osdag_gui.ui.components.dialogs.custom_titlebar import CustomTitleBar
 from osdag_gui.data.ui_data import Data
-
-active_plugins = Data.MODULES["Add-Ons"]
-@dataclass
-class PluginMetaData:      
-    name: str
-    description: str = field(default_factory=lambda: "No description available.")
-    authors: list = field(default_factory=lambda: [{"name": "Unknown"}])
-    version: str = field(default_factory=lambda: "1.0.0")
-    status: str = field(default_factory=lambda: "Inactive")
-    module: object = field(default=None)
-    entry_class: object = field(default=None)
+from osdag_core.utils.plugin_manager import PluginManager, PluginMetaData
 
 class StatusIndicator(QWidget):
-    def __init__(self, status="Inactive"):
-        super().__init__()
-        self.status = status
+    def __init__(self, plugin: PluginMetaData = None, parent=None):
+        super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
         layout.setSpacing(5)
 
-        self.circle = QLabel()
+        self.circle: QLabel = QLabel()
         self.circle.setFixedSize(12, 12)
         self.circle.setStyleSheet("border-radius: 6px; background-color: red;")
 
-        self.text = QLabel(status)
-        self.text.setStyleSheet("font-size: 12pt; font-weight: bold; color: #444;")
+        self.text: QLabel = QLabel("Inactive")
+        self.text.setStyleSheet(f"font-size: 9pt; font-weight: bold; color: red;")
 
         layout.addWidget(self.circle)
         layout.addWidget(self.text)
 
-        self.update_status(status)
+        self.update_status(plugin.status if plugin else False)
 
-    def update_status(self, status: str):
-        self.status = status
-        if status == "Active":
+    def update_status(self, status: bool) -> None:
+        if status:
             self.circle.setStyleSheet("border-radius: 6px; background-color: green;")
             self.text.setText("Active")
-            self.text.setStyleSheet("font-size: 9pt; font-weight: bold; color: green;")
+            self.text.setStyleSheet("color: green;")
         else:
             self.circle.setStyleSheet("border-radius: 6px; background-color: red;")
             self.text.setText("Inactive")
-            self.text.setStyleSheet("font-size: 9pt; font-weight: bold; color: red;")
+            self.text.setStyleSheet("color: red;")
 
 class PluginWidget(QWidget):
-    def __init__(self, plugin: PluginMetaData):
-        super().__init__()
+    activate = Signal(PluginMetaData)
+    deactivate = Signal(PluginMetaData)
+    remove = Signal(PluginMetaData)
+
+    def __init__(self, plugin: PluginMetaData, parent=None):
+        super().__init__(parent)
         self.plugin = plugin
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -87,10 +73,9 @@ class PluginWidget(QWidget):
         header_layout.setContentsMargins(2, 2, 2, 2)
         header_layout.setSpacing(5)
 
-        self.name_label = QLabel(plugin.name)
+        self.name_label = QLabel(f"{'<b>'+plugin.name+'</b> (Dev Plugin)' if plugin.is_dev else '<b>'+plugin.name+'</b>'}")
         self.name_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: #90AF13;")
-
-        self.status_indicator = StatusIndicator(plugin.status)
+        self.status_indicator = StatusIndicator(plugin)
 
         header_layout.addWidget(self.name_label, alignment=Qt.AlignLeft)
         header_layout.addStretch()
@@ -107,8 +92,12 @@ class PluginWidget(QWidget):
         # LEFT SIDE (description)
         self.content = QTextEdit()
         self.content.setReadOnly(True)
-        self.content.setText(plugin.description)
-        self.content.setFixedHeight(100)
+        content_text = f"{'<b>Author</b>' if len(self.plugin.authors) == 1 else '<b>Authors</b>'}: ({', '.join(author for author in self.plugin.authors)})"
+        content_text += f"<br><b>Description</b>: {self.plugin.description}"
+        self.content.setText(content_text)
+        self.content.setMinimumHeight(100)
+        self.content.setMaximumHeight(200)
+        self.content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.content.setStyleSheet("""
             QTextEdit {
                 border: 1px solid #e0e0e0;
@@ -126,7 +115,6 @@ class PluginWidget(QWidget):
         btn_layout = QVBoxLayout()
         btn_layout.setContentsMargins(4, 4, 4, 4)
         btn_layout.setSpacing(10)
-        btn_layout.setAlignment(Qt.AlignRight | Qt.AlignTop)
 
         self.btnActivate = QPushButton("Activate")
         self.btnDeactivate = QPushButton("Deactivate")
@@ -135,7 +123,7 @@ class PluginWidget(QWidget):
         for btn in (self.btnActivate, self.btnDeactivate, self.btnRemove):
             btn.setMinimumHeight(30)
             btn.setMinimumWidth(100)
-            btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+            btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             btn.setStyleSheet("""
                 QPushButton {
                     background-color: #90AF13;
@@ -156,33 +144,37 @@ class PluginWidget(QWidget):
         layout.addWidget(content)
 
         # --- Button Callbacks ---
-        self.btnActivate.clicked.connect(lambda checked=False: self.on_activate(plugin))
-        self.btnDeactivate.clicked.connect(lambda checked=False: self.on_deactivate(plugin))
-        self.btnRemove.clicked.connect(lambda checked=False: self.on_remove(plugin))
+        self.btnActivate.clicked.connect(self._emit_activate)
+        self.btnDeactivate.clicked.connect(self._emit_deactivate)
+        self.btnRemove.clicked.connect(self._emit_remove)
 
         content_min_width = self.content.sizeHint().width() + 150 
         self.setMinimumWidth(content_min_width)
+            
+    def _emit_activate(self):
+        if not self.plugin.status:
+            self.plugin.status = not self.plugin.status
+            self.status_indicator.update_status(self.plugin.status)
+            self.activate.emit(self.plugin)
 
-    def on_activate(self, plugin:PluginMetaData):
-        active_plugins.append((f"{self.plugin.name}" ,":/vectors/IITB_logo.svg"))
-        self.plugin.status = "Active"
-        self.status_indicator.update_status(self.plugin.status)
+    def _emit_deactivate(self):
+        if self.plugin.status:
+            self.plugin.status = not self.plugin.status
+            self.status_indicator.update_status(self.plugin.status)
+            self.deactivate.emit(self.plugin)
 
-    def on_deactivate(self, plugin:PluginMetaData):
-        active_plugins[:] = [
-            p for p in active_plugins if p[0] != self.plugin.name
-        ]
-        self.plugin.status = "Inactive"
-        self.status_indicator.update_status(self.plugin.status)
-
-    def on_remove(self):
-        self.setParent(None)
-        self.deleteLater()
+    def _emit_remove(self):
+        # self.setParent(None)
+        # self.deleteLater()
+        self.remove.emit(self.plugin)
 
 
 class PluginManagerDialog(QDialog):
     def __init__(self, parent=None):
-        super().__init__()
+        super().__init__(parent)
+        self.plugin_manager: PluginManager = QApplication.instance().plugin_manager
+        self.plugins: list[PluginMetaData] = self.plugin_manager.discover_plugins()
+        self.active_plugins: list[tuple[str, str]] = Data.MODULES["Add-Ons"]
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setObjectName("PluginManagerDialog")
@@ -233,14 +225,26 @@ class PluginManagerDialog(QDialog):
         self.pluginLayout.setAlignment(Qt.AlignTop)
         scroll.setWidget(self.pluginContainer)
 
-        # Add plugins
-        plugins = self._load_installed_plugins()
-        print(plugins)
-        for plugin in plugins:
-            pw = PluginWidget(plugin)
-            pw.setFixedHeight(120)
-            pw.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            self.pluginLayout.addWidget(pw)
+        if len(self.plugins) > 0:
+            print("\n===========Loaded Plugins===========\n")
+            for plugin in self.plugins:
+                print(f"    {plugin.name} by {', '.join(author for author in plugin.authors)}")
+                if plugin.status:
+                    print("     [INFO] Status: Active")
+                    self.activate_plugin(plugin)
+                else:
+                    print("     [INFO] Status: Inactive")
+                pw = PluginWidget(plugin=plugin, parent=self)
+                pw.activate.connect(self.plugin_manager.activate)
+                pw.activate.connect(self.activate_plugin)
+                pw.deactivate.connect(self.plugin_manager.deactivate)
+                pw.deactivate.connect(self.deactivate_plugin)
+                pw.remove.connect(self.plugin_manager.remove)
+                pw.remove.connect(self.remove_plugin)
+                pw.setFixedHeight(120)
+                pw.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                self.pluginLayout.addWidget(pw)
+            print("\n=====================================\n")
 
         # OK button
         buttonLayout = QHBoxLayout()
@@ -253,114 +257,38 @@ class PluginManagerDialog(QDialog):
             QPushButton:hover { background-color: #7A9611; }
             QPushButton:pressed { background-color: #6B850F; }
         """)
-        self.okButton.clicked.connect(self.accept)
+        self.okButton.clicked.connect(self.okClicked)
         buttonLayout.addWidget(self.okButton)
 
         contentLayout.addLayout(buttonLayout)
         mainLayout.addWidget(contentWidget)
 
+    def activate_plugin(self, plugin: PluginMetaData):
+        plugin = self.plugin_manager.get_plugin(plugin.id)
+        if plugin and (plugin.name, ":/vectors/IITB_logo.svg") not in self.active_plugins:
+            self.active_plugins.append((plugin.name, ":/vectors/IITB_logo.svg"))
 
+    def deactivate_plugin(self, plugin: PluginMetaData):
+        self.active_plugins[:] = [
+            p for p in self.active_plugins if p[0] != plugin.name
+        ]
 
-    def _load_installed_plugins(self) -> list[PluginMetaData]:
-        plugins: list[PluginMetaData] = []
-        development_plugins_path = Path(__file__).resolve().parent.parent.parent.parent.parent / "plugins"
-        try:
-            entry_points = metadata.entry_points().select(group="osdag.plugins")
-            print(entry_points)
-            for ep in entry_points:
-                module = ep.load()
-                print(f"Loaded module: {module}")
-                if not getattr(module, "IS_OSDAG_PLUGIN", False):
-                    print(f"[WARN] Module {ep.name} is not marked as an Osdag plugin.")
-                    continue
-                meta = getattr(module, "META", {})
-                name = meta.get("name")
-                if name is None:
-                    print(f"[WARN] Plugin {ep.name} missing 'name' in META.")
-                    continue
-                description = meta.get("description", "No description available.")
-                authors = meta.get("authors", [{"name": "Unknown"}])
-                version = meta.get("version", "1.0")
-                entry_class = self._resolve_entry_class(module, name, getattr(module, "ENTRY_POINT", None))
-                print(entry_class)
-                if entry_class is None:
-                    print(f"[WARN] Failed to resolve entry class for plugin '{name}' (site-packages).")
-                    continue
-                plugins.append(
-                    PluginMetaData(
-                        name=name,
-                        description=description,
-                        authors=authors,
-                        version=version,
-                        module=module,
-                        entry_class=entry_class,
-                    )
-                )
-        except Exception as e:
-            print(f"[WARN] Entry point loading failed: {e}")
+    def remove_plugin(self, plugin: PluginMetaData):
+        self.active_plugins[:] = [
+            p for p in self.active_plugins if p[0] != plugin.name
+        ]
 
-        if development_plugins_path.exists():
-            for _, name, ispkg in pkgutil.iter_modules([str(development_plugins_path)]):
-                existing_names = {p.name for p in plugins}
-                if name in existing_names:
-                    continue
-                if not ispkg:
-                    continue
-                try:
-                    module = importlib.import_module(f"plugins.{name}")
-                    if not getattr(module, "IS_OSDAG_PLUGIN", False):
-                        continue
-                    
-                    meta = getattr(module, "META", {})
-                    name = meta.get("name")
-                    if name is None:
-                        print(f"[WARN] Plugin {ep.name} in development missing 'name' in META.")
-                        continue
-                    description = meta.get("description", "No description available.")
-                    authors = meta.get("authors", [{"name": "Unknown"}])
-                    version = meta.get("version", "1.0")
-                    entry_class = self._resolve_entry_class(module, name, getattr(module, "ENTRY_POINT", None))
-                    if entry_class is None:
-                        print(f"[WARN] Failed to resolve entry class for plugin '{name}' (development).")
-                        continue
-
-                    plugins.append(
-                        PluginMetaData(
-                            name=name,
-                            description=description,
-                            authors=authors,
-                            version=version,
-                            module=module,
-                            entry_class=entry_class,
-                        )
-                    )
-                except Exception as e:
-                    print(f"[WARN] Skipped {name}: {e}")
-        print(plugins)
-        return plugins
+    def closeEvent(self, event):
+        self.plugin_manager.state_manager.flush()
+        super().closeEvent(event)           
     
-    def _resolve_entry_class(self, module, name, entry_path: str):
+    def okClicked(self):
+        self.plugin_manager.state_manager.flush()
+        self.accept()
 
-        if not entry_path:
-            print(f"[WARN] Plugin '{name}' missing 'PLUGIN_ENTRY'.")
-            return None
-
-
-        try:
-            parts = entry_path.split(".")
-            submodule_name = ".".join(parts[:-1])
-            class_name = parts[-1]
-            entry_module = importlib.import_module(f"{module.__name__}.{submodule_name}")
-            entry_class = getattr(entry_module, class_name)
-            return entry_class
-
-        except Exception as e:
-            print(f"[WARN] Could not resolve entry class '{entry_path}' for plugin '{name}': {e}")
-            return None
-
-# Test the dialog
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    dialog = PluginManagerDialog()
-    dialog.exec()
-    sys.exit(app.exec())
+# # Test the dialog
+# if __name__ == "__main__":
+#     app = QApplication(sys.argv)
+#     dialog = PluginManagerDialog()
+#     dialog.exec()
+#     sys.exit(app.exec())

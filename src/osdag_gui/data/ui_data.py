@@ -88,9 +88,7 @@ class Data:
         [],
         # ----Plugins----
         "Add-Ons": 
-        [
-            ("Steel Designer", ":/vectors/IITB_logo.svg"),
-        ]
+        []
     }
     
     NAVBAR_ICONS = {

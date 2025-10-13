@@ -2,7 +2,7 @@ IS_OSDAG_PLUGIN = True
 META = {
     "name": "Purlin Designer",
     "description": "Design purlins as per IS 800 standard.",
-    "authors": [{"name": "FOSSEE Team"}],
+    "authors": ["FOSSEE Team"],
     "version": "1.0.0",
 }
 
