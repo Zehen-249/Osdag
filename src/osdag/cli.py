@@ -166,7 +166,8 @@ def run_module(*args, **kargs) -> dict:
     input_filename = osi_path.stem
     output_filename = output_path.stem if output_path else None
     if not output_path:
-        output_folder_path = osi_path.parent / "Outputs" / f"{module_class.__name__}"
+        documents_folder = Path.home() / "Documents"
+        output_folder_path = documents_folder / "OsdagOutputs" / f"{module_class.__name__}"
     else:
         output_folder_path = output_path.parent / f"{module_class.__name__}"
     output_folder_path.mkdir(parents=True, exist_ok=True)
@@ -215,9 +216,3 @@ def run_module(*args, **kargs) -> dict:
         print(result)
     
     return result
-
-
-
-# run_module(r"C:\Users\1hasa\Osdag\TensionBoltedTest4.osi",op_type="save to csv")
-# run_module(r"C:\Users\1hasa\Osdag\TensionBoltedTest4.osi",op_type="save to pdf")
-# print(run_module(r"C:\Users\1hasa\Osdag\TensionBoltedTest4.osi",op_type="output dictionary"))
