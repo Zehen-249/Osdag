@@ -1,0 +1,105 @@
+# Note: there are many handy hints in comments in this example -- remove them when you've finalized your recipe
+# If your package is python based, we recommend using Grayskull to generate it instead:
+# https://github.com/conda-incubator/grayskull
+
+# Jinja variables help maintain the recipe as you'll update the version only here.
+# Using the name variable with the URL in line 16 is convenient
+# when copying and pasting from another recipe, but not really needed.
+{% set name = "Osdag" %}
+{% set version = "2025.01.a.3" %}
+{% set source_url = "https://github.com/Zehen-249/Osdag.git" %}
+{% set source_branch = "osdag_new_release" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  # url: https://github.com/AjinkyaDahale/{{ name }}/archive/refs/heads/{{ branch }}.zip
+  git_url: {{ source_url }}
+  git_rev: {{ source_branch }}
+  # sha256: fd1a7d884d0e2d1c7cf64362418b875bec50fdc8
+  # sha256 is the preferred checksum -- you can get it for a file with:
+  #  `openssl sha256 <file name>`.
+  # You may need the openssl package, available on conda-forge:
+  #  `conda install openssl -c conda-forge``
+
+build:
+  number: 0
+  # Uncomment the following line if the package is pure Python and the recipe is exactly the same for all platforms.
+  # It is okay if the dependencies are not built for all platforms/versions, although selectors are still not allowed.
+  # See https://conda-forge.org/docs/maintainer/knowledge_base.html#noarch-python for more details.
+  # noarch: python
+  # If the installation is complex, or different between Unix and Windows, use separate bld.bat and build.sh files instead of this key.
+  # By default, the package will be built for the Python versions supported by conda-forge and for all major OSs.
+  # Add the line "skip: True  # [py<35]" (for example) to limit to Python 3.5 and newer, or "skip: True  # [not win]" to limit to Windows.
+  # More info about selectors can be found in the conda-build docs:
+  # https://docs.conda.io/projects/conda-build/en/latest/resources/define-metadata.html#preprocessing-selectors
+  script: {{ PYTHON }} -m pip install --no-deps --force-reinstall . -vv
+  entry_points:
+    - osdag = osdag.osdagMainPage:do_stuff
+
+requirements:
+  build:
+    # If your project compiles code (such as a C extension) then add the required compilers as separate entries here.
+    # Compilers are named 'c', 'cxx' and 'fortran'.
+    - python>=3.10
+    - setuptools
+  run:
+    - python>=3.10
+    - numpy
+    - openpyxl
+    - pandas
+    - pynput
+    - pyqt
+    - pythonocc-core
+    - pylatex
+    - pygithub
+    - pyyaml
+    - sqlite
+    - smesh
+    - tbb
+
+test:
+  # Some packages might need a `test/commands` key to check CLI.
+  # List all the packages/modules that `run_test.py` imports.
+  #  imports:
+  #  - simplejson
+  #  - simplejson.tests
+  # For python packages, it is useful to run pip check. However, sometimes the
+  # metadata used by pip is out of date. Thus this section is optional if it is
+  # failing.
+  #  requires:
+  #    - pip
+  #  commands:
+  #    - pip check
+  imports:
+    - osdag
+
+about:
+  home: https://osdag.fossee.in
+  summary: 'Open steel design and graphics'
+  description: |
+    Open steel design and graphics
+  # Remember to specify the license variants for BSD, Apache, GPL, and LGPL.
+  # Use the SPDX identifier, e.g: GPL-2.0-only instead of GNU General Public License version 2.0
+  # See https://spdx.org/licenses/
+  license: LGPL-3.0-only
+  # The license_family, i.e. "BSD" if license is "BSD-3-Clause". 
+  # Optional
+  license_family: LGPL
+  # It is required to include a license file in the package,
+  # (even if the license doesn't require it) using the license_file entry.
+  # Please also note that some projects have multiple license files which all need to be added using a valid yaml list.
+  # See https://docs.conda.io/projects/conda-build/en/latest/resources/define-metadata.html#license-file
+  license_file: LICENSE
+  # The doc_url and dev_url are optional.
+  doc_url: https://osdag.fossee.in
+  dev_url: https://github.com/osdag-admin/Osdag
+
+extra:
+  recipe-maintainers:
+    # GitHub IDs for maintainers of the recipe.
+    # Always check with the people listed below if they are OK becoming maintainers of the recipe. (There will be spam!)
+    - AjinkyaDahale
+    - Zehen-249
