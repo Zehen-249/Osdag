@@ -5,7 +5,10 @@ from pylatex.utils import bold
 import sys
 import datetime
 import os
+from importlib.resources import files
+from pylatex.utils import NoEscape
 
+os.environ['TEXMFHOME'] = os.path.abspath("data/ResourceFiles/osdag-latex-env/texmf-dist")
 class CreateLatex(Document):
     def __init__(self):
         super().__init__()
@@ -36,12 +39,21 @@ class CreateLatex(Document):
         # Create right footer
         with header.create(Foot("R")):
             header.append(NoEscape(r'Page \thepage'))
-        
+
+        os.environ['TEXMFHOME'] = os.path.abspath("data/ResourceFiles/osdag-latex-env/texmf-dist")
+        sty_pkgs = str(files("osdag.data.ResourceFiles.osdag-latex-env.texmf-dist")).replace("\\","/")
+        pkg_resources = [f'{sty_pkgs}/amsmath',f'{sty_pkgs}/graphics',f'{sty_pkgs}/needspace']
+        texinp = os.environ.get('TEXINPUTS',' ')
+
+        pkg_path = ";".join(pkg_resources)
+        os.environ['TEXINPUTS'] = f'{pkg_path};{texinp}'
+
+
         geometry_options = {"top": "1.2in", "bottom": "1in", "left": "0.6in", "right": "0.6in", "headsep": "0.8in"}
         doc = Document(geometry_options=geometry_options, indent=False)
-        doc.packages.append(Package('amsmath'))
-        doc.packages.append(Package('graphicx'))
-        doc.packages.append(Package('needspace'))
+        doc.packages.append(Package('amsmath', options = NoEscape('')))
+        doc.packages.append(Package('graphicx', options = NoEscape('')))
+        doc.packages.append(Package('needspace', options = NoEscape('')))
         doc.add_color('OsdagGreen', 'HTML', 'D5DF93')
         doc.preamble.append(header)
         doc.change_document_style("header")
@@ -127,7 +139,8 @@ class CreateLatex(Document):
                     view_3D.add_image(filename=view_3dimg_path)
 
                     view_3D.add_caption('3D View')   
-        try:            
-            doc.generate_pdf(filename, compiler='pdflatex', clean_tex=False)
+        try:
+            latex_executable = os.path.abspath("data/ResourceFiles/osdag-latex-env/bin/windows/pdflatex.exe")
+            doc.generate_pdf(filename, compiler=latex_executable, clean_tex=False)
         except:
             pass

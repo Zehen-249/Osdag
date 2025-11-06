@@ -18,8 +18,12 @@ from pylatex import Document, PageStyle, Head, MiniPage, Foot, LargeText, Medium
 from importlib.resources import files
 from ..Report_functions import *
 from ..utils.common.common_calculation import *
+from pylatex.utils import NoEscape
+
 # from ..Common import *
 # from ..utils.common import component
+os.environ['TEXMFHOME'] = os.path.abspath("data/ResourceFiles/osdag-latex-env/texmf-dist")
+os.environ["TEXINPUTS"] = os.path.abspath("data/ResourceFiles/osdag-latex-env/texmf-dist") + os.pathsep + os.environ.get("TEXINPUTS", "")
 
 class CreateLatex(Document):
 
@@ -27,6 +31,9 @@ class CreateLatex(Document):
         super().__init__()
 
     def save_latex(self, uiObj, Design_Check, reportsummary, filename, rel_path, Disp_2d_image, Disp_3d_image, module=''):
+        os.environ['TEXMFHOME'] = os.path.abspath("data/ResourceFiles/osdag-latex-env/texmf-dist")
+        os.environ["TEXINPUTS"] = os.path.abspath("data/ResourceFiles/osdag-latex-env/texmf-dist") + os.pathsep + os.environ.get("TEXINPUTS", "")
+
         companyname = str(reportsummary["ProfileSummary"]['CompanyName'])
         companylogo = str(reportsummary["ProfileSummary"]['CompanyLogo'])
         groupteamname = str(reportsummary["ProfileSummary"]['Group/TeamName'])
@@ -38,13 +45,22 @@ class CreateLatex(Document):
 
         does_design_exist = reportsummary['does_design_exist']
         pkg_images = files("osdag.data.ResourceFiles.images")
+
+        os.environ['TEXMFHOME'] = os.path.abspath("data/ResourceFiles/osdag-latex-env/texmf-dist")
+        sty_pkgs = str(files("osdag.data.ResourceFiles.osdag-latex-env.texmf-dist.tex.latex")).replace("\\", "/")
+        pkg_resources = [f'{sty_pkgs}/amsmath', f'{sty_pkgs}/graphics', f'{sty_pkgs}/needspace']
+        texinp = os.environ.get('TEXINPUTS', ' ')
+
+        pkg_path = ";".join(pkg_resources)
+        os.environ['TEXINPUTS'] = f'{pkg_path};{texinp}'
+
         imgpath_osdagheader = str(pkg_images.joinpath("Osdag_header_report.png")).replace("\\", "/")
         # Add document header
         geometry_options = {"top": "5cm", "hmargin": "2cm", "headheight": "100pt", "footskip": "100pt", "bottom":"5cm"}
         doc = Document(geometry_options=geometry_options, indent=False)
-        doc.packages.append(Package('amsmath'))
-        doc.packages.append(Package('graphicx'))
-        doc.packages.append(Package('needspace'))
+        doc.packages.append(Package('amsmath', options=NoEscape('')))
+        doc.packages.append(Package('graphicx', options=NoEscape('')))
+        doc.packages.append(Package('needspace', options=NoEscape('')))
         doc.append(pyl.Command('fontsize', arguments= [8,12]))
         doc.append(pyl.Command('selectfont'))
 
@@ -59,7 +75,7 @@ class CreateLatex(Document):
             with header.create(Tabularx('|l|p{4cm}|l|X|')) as table:
                 table.add_hline()
                 # MultiColumn(4)
-                table.add_row((MultiColumn(2, align='|c|', data=('' if companylogo is '' else StandAloneGraphic(image_options="height=0.95cm",
+                table.add_row((MultiColumn(2, align='|c|', data=('' if companylogo == '' else StandAloneGraphic(image_options="height=0.95cm",
                                                                                                                filename=companylogo))),
                                MultiColumn(2, align='|c|', data=['Created with',StandAloneGraphic(image_options="width=4.0cm,height=1cm",
                                                                                                   filename=imgpath_osdagheader)]),))
@@ -478,7 +494,17 @@ class CreateLatex(Document):
                     continue
                 doc.append(TextColor(colour,'\n'+msg))
         try:
-            doc.generate_pdf(filename, compiler='pdflatex', clean_tex=False)
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+
+            # Go one level up to reach the parent directory
+            parent_dir = os.path.dirname(script_dir)
+
+            # Construct the path to pdflatex.exe
+            latex_executable = os.path.join(parent_dir, "data", "ResourceFiles", "osdag-latex-env", "bin", "windows", "pdflatex.exe")
+
+            # Ensure the path is absolute
+            latex_executable = os.path.abspath(latex_executable)
+            doc.generate_pdf(filename, compiler=latex_executable, clean_tex = False)
         except:
             pass
 
