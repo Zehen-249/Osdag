@@ -67,6 +67,7 @@ import yaml, click
 import pandas as pd
 
 def _print_result(out_dict:dict):
+    """print the output dictionary in a formatted way."""
     print("="*100)
     for key, value in out_dict.items():
         print(f"|| {key}: {value}")
@@ -124,7 +125,16 @@ def _save_to_pdf(module_class:Main, output_file:Path):
 
 
 def run_module(*args, **kargs) -> dict:
-    """Run the module specified in the OSI file located at osi_path."""
+    """Run the module specified in the OSI file located at osi_path.
+
+    Parameters:
+        osi_path(Required): (str or Path): Path to the OSI file.
+        op_type(Optional): (str): Type of operation to perform. Options are 'print_result', 'save_csv', 'save_pdf'. Default is 'print_result'.
+        output_path(Optional): (str or Path): Path to save the output file (for 'save_csv' and 'save_pdf').
+
+    Returns:
+        dict: A dictionary containing the result of the operation, including success status, input/output paths.    
+    """
     osi_path = kargs["input_path"] if len(kargs) > 0 else None
     op_type = kargs["op_type"] if len(kargs) > 1 else "print_result"
     output_path = kargs["output_path"] if len(kargs) > 2 else None
@@ -216,3 +226,32 @@ def run_module(*args, **kargs) -> dict:
         print(result)
     
     return result
+
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run Osdag module from OSI file.")
+    parser.add_argument("input_path", type=str, help="Path to the input OSI file.")
+    parser.add_argument(
+        "--op_type",
+        type=str,
+        default="print_result",
+        choices=["print_result", "save_csv", "save_pdf"],
+        help="Type of operation to perform.",
+    )
+    parser.add_argument(
+        "--output_path",
+        type=str,
+        default=None,
+        help="Path to save the output file (for save_csv and save_pdf).",
+    )
+
+    args = parser.parse_args()
+
+    run_module(
+        input_path=args.input_path,
+        op_type=args.op_type,
+        output_path=args.output_path,
+    )
