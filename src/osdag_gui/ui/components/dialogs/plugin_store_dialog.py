@@ -10,49 +10,35 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QScrollArea
 )
-from PySide6.QtCore import Qt , Signal, Slot
+from PySide6.QtCore import Qt , Signal, Slot, QObject, QThread, QTimer, QMetaObject
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtGui import QIcon
 from osdag_gui.ui.components.dialogs.custom_titlebar import CustomTitleBar
 from osdag_gui.data.ui_data import Data
 from osdag_core.utils.plugin_manager import PluginManager, PluginMetaData
-from osdag_gui.ui.components.dialogs.plugin_store_dialog import PluginStoreDialog
 
-class StatusIndicator(QWidget):
-    def __init__(self, plugin: PluginMetaData = None, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
-        layout.setSpacing(5)
+class Worker(QObject):
+    finished = Signal(bool)
 
-        self.circle: QLabel = QLabel()
-        self.circle.setFixedSize(12, 12)
-        self.circle.setStyleSheet("border-radius: 6px; background-color: red;")
+    def __init__(self, func, *args, **kwargs):
+        super().__init__()
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
 
-        self.text: QLabel = QLabel("Inactive")
-        self.text.setStyleSheet(f"font-size: 9pt; font-weight: bold; color: red;")
-
-        layout.addWidget(self.circle)
-        layout.addWidget(self.text)
-
-        self.update_status(plugin.status if plugin else False)
-
-    def update_status(self, status: bool) -> None:
-        if status:
-            self.circle.setStyleSheet("border-radius: 6px; background-color: green;")
-            self.text.setText("Active")
-            self.text.setStyleSheet("color: green;")
-        else:
-            self.circle.setStyleSheet("border-radius: 6px; background-color: red;")
-            self.text.setText("Inactive")
-            self.text.setStyleSheet("color: red;")
+    @Slot()
+    def run(self):
+        import threading
+        try:
+            result = self.func(*self.args, **self.kwargs)
+            self.finished.emit(bool(result))
+        except Exception as e:
+            print(f"[WORKER] Exception: {e}")
+            self.finished.emit(False) 
 
 class PluginWidget(QWidget):
-    activate = Signal(PluginMetaData)
-    deactivate = Signal(PluginMetaData)
+    download = Signal(PluginMetaData)
     delete = Signal(PluginMetaData)
-
     def __init__(self, plugin: PluginMetaData, parent=None):
         super().__init__(parent)
         self.plugin = plugin
@@ -74,13 +60,13 @@ class PluginWidget(QWidget):
         header_layout.setContentsMargins(2, 2, 2, 2)
         header_layout.setSpacing(5)
 
-        self.name_label = QLabel(f"{'<b>'+plugin.name+'</b> (Dev Plugin)' if plugin.is_dev else '<b>'+plugin.name+'</b>'}")
+        self.name_label = QLabel(f"{'<b>'+plugin.name+'</b>' }")
         self.name_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: #90AF13;")
-        self.status_indicator = StatusIndicator(plugin)
+        # self.status_indicator = StatusIndicator(plugin)
 
         header_layout.addWidget(self.name_label, alignment=Qt.AlignLeft)
-        header_layout.addStretch()
-        header_layout.addWidget(self.status_indicator, alignment=Qt.AlignRight)
+        # header_layout.addStretch()
+        # header_layout.addWidget(self.status_indicator, alignment=Qt.AlignRight)
 
         layout.addWidget(header)
 
@@ -117,11 +103,10 @@ class PluginWidget(QWidget):
         btn_layout.setContentsMargins(4, 4, 4, 4)
         btn_layout.setSpacing(10)
 
-        self.btnActivate = QPushButton("Activate")
-        self.btnDeactivate = QPushButton("Deactivate")
+        self.btnDownload = QPushButton("Download")
         self.btnDelete = QPushButton("Delete")
 
-        for btn in (self.btnActivate, self.btnDeactivate, self.btnDelete):
+        for btn in (self.btnDownload, self.btnDelete):
             btn.setMinimumHeight(30)
             btn.setMinimumWidth(100)
             btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -145,50 +130,32 @@ class PluginWidget(QWidget):
         layout.addWidget(content)
 
         # --- Button Callbacks ---
-        self.btnActivate.clicked.connect(self._emit_activate)
-        self.btnDeactivate.clicked.connect(self._emit_deactivate)
         self.btnDelete.clicked.connect(self._emit_delete)
+        self.btnDownload.clicked.connect(self._emit_download)
 
         content_min_width = self.content.sizeHint().width() + 150 
         self.setMinimumWidth(content_min_width)
-            
-    def _emit_activate(self):
-        if not self.plugin.status:
-            self.plugin.status = not self.plugin.status
-            self.status_indicator.update_status(self.plugin.status)
-            self.activate.emit(self.plugin)
 
-    def _emit_deactivate(self):
-        if self.plugin.status:
-            self.plugin.status = not self.plugin.status
-            self.status_indicator.update_status(self.plugin.status)
-            self.deactivate.emit(self.plugin)
+    def _emit_download(self):
+        self.download.emit(self.plugin)
 
     def _emit_delete(self):
         self.delete.emit(self.plugin)
 
 
-class PluginManagerDialog(QDialog):
+
+
+class PluginStoreDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.plugin_manager: PluginManager = QApplication.instance().plugin_manager
-        self.plugins: list[PluginMetaData] = self.plugin_manager.discover_local_plugins()
-        self.active_plugins: list[tuple[str, str]] = Data.MODULES["Add-Ons"]
+        self.plugin_manager = QApplication.instance().plugin_manager
+        self.plugins: list[PluginMetaData] = self.plugin_manager.discover_online_plugins(channel="zehen-249")
+        self.local_plugins: list[PluginMetaData] = self.plugin_manager.discover_local_plugins()
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setObjectName("PluginManagerDialog")
         self.setWindowIcon(QIcon(":/images/osdag_logo.png"))
-        self.setFixedSize(720, 600)
 
-        # Layout and style
-        self.setStyleSheet("""
-            QDialog#PluginManagerDialog { background-color: #ffffff; border: 1px solid #90AF13; }
-            QWidget#ContentWidget { background-color: #ffffff; }
-            QPushButton { background-color: #90AF13; color: white; border: none; border-radius: 5px;
-                          padding: 5px 20px; font-size: 12px; font-weight: bold; }
-            QPushButton:hover { background-color: #7A9611; }
-            QPushButton:pressed { background-color: #6B850F; }
-        """)
 
         mainLayout = QVBoxLayout(self)
         mainLayout.setContentsMargins(1, 1, 1, 1)
@@ -196,7 +163,7 @@ class PluginManagerDialog(QDialog):
 
         # Title bar
         self.titleBar = CustomTitleBar()
-        self.titleBar.setTitle("Plugin Manager")
+        self.titleBar.setTitle("Plugin Store")
         mainLayout.addWidget(self.titleBar)
 
         # Content
@@ -218,49 +185,18 @@ class PluginManagerDialog(QDialog):
         scroll.setStyleSheet("QScrollArea { border: 0.5px solid black; background-color: #F0F0F0; }")
         contentLayout.addWidget(scroll)
 
+
         # Container for plugin widgets
         self.pluginContainer = QWidget()
         self.pluginLayout = QVBoxLayout(self.pluginContainer)
         self.pluginLayout.setAlignment(Qt.AlignTop)
         scroll.setWidget(self.pluginContainer)
 
-        if len(self.plugins) > 0:
-            print("\n===========Loaded Plugins===========\n")
-            for plugin in self.plugins:
-                print(f"    {plugin.name} by {', '.join(author for author in plugin.authors)}")
-                if plugin.status:
-                    print("     [INFO] Status: Active")
-                    self.activate_plugin(plugin)
-                else:
-                    print("     [INFO] Status: Inactive")
-                pw = PluginWidget(plugin=plugin, parent=self)
-                pw.activate.connect(self.plugin_manager.activate)
-                pw.activate.connect(self.activate_plugin)
-                pw.deactivate.connect(self.plugin_manager.deactivate)
-                pw.deactivate.connect(self.deactivate_plugin)
-                pw.delete.connect(self.plugin_manager.delete_plugin)
-                pw.setFixedHeight(120)
-                pw.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-                self.pluginLayout.addWidget(pw)
-            print("\n=====================================\n")
+        # Populate plugins in the scroll area
+        self._populate_plugins()
 
-        # Plugin Store button
-        self.storeButton = QPushButton("Store", self)
-        self.storeButton.setFixedHeight(30)
-        self.storeButton.setStyleSheet("""
-            QPushButton {
-                background-color: #0078D7; color: white; border: none; border-radius: 5px;
-                padding: 5px 20px; font-size: 12px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #0063B1; }
-            QPushButton:pressed { background-color: #004E8C; }
-        """)
-        self.storeButton.clicked.connect(self.open_store_dialog)
-        
-
-        # OK button
+         # OK button
         buttonLayout = QHBoxLayout()
-        buttonLayout.addWidget(self.storeButton)
         buttonLayout.addStretch()
         self.okButton = QPushButton("OK", self)
         self.okButton.setFixedHeight(30)
@@ -276,60 +212,124 @@ class PluginManagerDialog(QDialog):
         contentLayout.addLayout(buttonLayout)
         mainLayout.addWidget(contentWidget)
 
-    
+    def delete_plugin(self, plugin: PluginMetaData, widget: PluginWidget):
+        widget.btnDelete.setEnabled(False)
+        widget.name_label.setText(f"<b>{plugin.name} (Deleting...)</b>")
+        QApplication.processEvents()  # ensures repaint before thread starts
 
-    def activate_plugin(self, plugin: PluginMetaData):
-        plugin = self.plugin_manager.get_plugin(plugin.id)
-        if plugin and (plugin.name, ":/vectors/IITB_logo.svg") not in self.active_plugins:
-            self.active_plugins.append((plugin.name, ":/vectors/IITB_logo.svg"))
-    def deactivate_plugin(self, plugin: PluginMetaData):
-        self.active_plugins[:] = [
-            p for p in self.active_plugins if p[0] != plugin.name
-        ]
+        thread = QThread()
+        worker = Worker(self.plugin_manager.delete_plugin, plugin)
+        worker.moveToThread(thread)
 
-    def delete_plugin(self, plugin: PluginMetaData):
-        self.deactivate_plugin(plugin)
-        self.plugin_manager.delete_plugin(plugin)
-        self.refresh_plugin()
-    
-    def open_store_dialog(self):
-        # print("[PLUGIN STORE] Opening Plugin Store Dialog...")
-        store_dialog = PluginStoreDialog()
-        store_dialog.exec() 
+        # Connect signals
+        thread.started.connect(lambda : self.start_worker(worker))
+        worker.finished.connect(lambda success: self._on_delete_finished(success, widget, plugin))
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
 
+        # Keep a reference so thread isn’t Garbagecollected
+        if not hasattr(self, "plugin_store_threads"):
+            self.plugin_store_threads = []
+        self.plugin_store_threads.append(thread)
+        thread.finished.connect(lambda: self.plugin_store_threads.remove(thread))
+        thread.start()
 
+    def _on_delete_finished(self, success, widget, plugin):
+        if success:
+            print(f"[INFO] Successfully deleted plugin: {plugin.name}")
+            widget.btnDelete.setVisible(False)
+            widget.btnDownload.setVisible(True)
+            widget.btnDownload.setEnabled(True)
+            widget.name_label.setText(f"<b>{plugin.name}</b>")
+        else:
+            print(f"[INFO] Failed to delete plugin: {plugin.name}")
+            widget.name_label.setText(f"<b>{plugin.name} (Downloaded)</b>")
+            widget.btnDelete.setEnabled(True)
+
+    def download_plugin(self, plugin: PluginMetaData, widget: PluginWidget):
+        widget.btnDownload.setEnabled(False)
+        widget.name_label.setText(f"<b>{plugin.name} (Downloading...)</b>")
+        QApplication.processEvents()  # ensures repaint before thread starts
+
+        thread = QThread()
+        worker = Worker(self.plugin_manager.download_plugin, plugin)
+        worker.moveToThread(thread)
+
+        # Connect signals
+        thread.started.connect(lambda : self.start_worker(worker))
+        worker.finished.connect(lambda success: self._on_download_finished(success, widget, plugin))
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        
+
+        # Keep a reference so thread isn’t Garbagecollected
+        if not hasattr(self, "plugin_store_threads"):
+            self.plugin_store_threads = []
+        self.plugin_store_threads.append(thread)
+        thread.finished.connect(lambda: self.plugin_store_threads.remove(thread))
+        thread.start()
+
+    def _on_download_finished(self, success, widget, plugin):
+        if success:
+            print(f"[INFO] Successfully downloaded plugin: {plugin.name}")
+            widget.btnDownload.setVisible(False)
+            widget.btnDelete.setVisible(True)
+            widget.btnDelete.setEnabled(True)
+            widget.name_label.setText(f"<b>{plugin.name} (Downloaded)</b>")
+        else:
+            print(f"[INFO] Failed to download plugin: {plugin.name}")
+            widget.name_label.setText(f"<b>{plugin.name}</b>")
+            widget.btnDownload.setEnabled(True)
+
+    def start_worker(self, worker):
+            QMetaObject.invokeMethod(worker, "run", Qt.QueuedConnection)
+        
     def refresh_plugins(self):
-        self.plugins = self.plugin_manager.discover_local_plugins()
-        # Clear old plugin widgets
+        # Re-discover both local and online plugins
+        self.plugins = self.plugin_manager.discover_online_plugins()
+        self.local_plugins = self.plugin_manager.discover_local_plugins()
+
+        # Clear all plugin widgets from the layout
         for i in reversed(range(self.pluginLayout.count())):
             widget = self.pluginLayout.itemAt(i).widget()
             if widget:
                 widget.setParent(None)
 
-        # Re-add plugin widgets
+        # Rebuild plugin list widgets
+        self._populate_plugins()           
+
+    def _populate_plugins(self):
         if len(self.plugins) > 0:
             for plugin in self.plugins:
                 pw = PluginWidget(plugin=plugin, parent=self)
-                pw.activate.connect(self.plugin_manager.activate)
-                pw.activate.connect(self.activate_plugin)
-                pw.deactivate.connect(self.plugin_manager.deactivate)
-                pw.deactivate.connect(self.deactivate_plugin)
-                pw.delete.connect(self.plugin_manager.delete_plugin)
+                pw.download.connect(lambda plugin, w=pw: self.download_plugin(plugin, w)) # capture pw by reference in lambda
+                pw.delete.connect(lambda plugin, w=pw: self.delete_plugin(plugin, w))
+                pw.btnDelete.setVisible(False)
+                pw.btnDelete.setEnabled(False)
                 pw.setFixedHeight(120)
                 pw.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                is_downloaded = any(lp.id == plugin.id for lp in self.local_plugins)
+                if is_downloaded:
+                    pw.btnDownload.setEnabled(False)
+                    pw.btnDownload.setVisible(False)
+                    pw.btnDelete.setVisible(True)
+                    pw.btnDelete.setEnabled(True)
+                    pw.name_label.setText(f"<b>{plugin.name} (Downloaded)</b>")
+
                 self.pluginLayout.addWidget(pw)
 
     def closeEvent(self, event):
         self.plugin_manager.state_manager.flush()
-        super().closeEvent(event)           
-    
+        self._refreshManager()
+        super().closeEvent(event)   
+
     def okClicked(self):
         self.plugin_manager.state_manager.flush()
+        self._refreshManager()
         self.accept()
-
-# # Test the dialog
-# if __name__ == "__main__":
-#     app = QApplication(sys.argv)
-#     dialog = PluginManagerDialog()
-#     dialog.exec()
-#     sys.exit(app.exec())
+      
+    def _refreshManager(self):
+        self.plugin_manager_dialog = QApplication.instance().plugin_manager_dialog
+        self.plugin_manager_dialog.refresh_plugins()

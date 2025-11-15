@@ -1,20 +1,18 @@
 import json
-import os
+import os, subprocess, sys, requests
 import tempfile
 from dataclasses import dataclass, field
 from threading import Lock
 from importlib import metadata
 from pathlib import Path
 import pkgutil
-import importlib
+import importlib, uuid
 from types import ModuleType
-from typing import Optional
-import uuid
 
 
 @dataclass
 class PluginMetaData:
-    id: str = field(init=False)
+    id: str
     name: str
     description: str = field(
         default_factory=lambda: "No description available.")
@@ -24,9 +22,6 @@ class PluginMetaData:
     module: object = field(default_factory=lambda: None)
     entry_class: object = field(default_factory=lambda: None)
     is_dev: bool = field(default_factory=lambda: False)
-
-    def __post_init__(self):
-        self.id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{self.name}:{self.version}"))
 
 
 class PluginManager:
@@ -41,7 +36,7 @@ class PluginManager:
     # ---------------------------
     # Plugin Discovery (Local Under Development & Installed Plugins)
     # ---------------------------
-    def discover_plugins(self) -> list[PluginMetaData]:
+    def discover_local_plugins(self) -> list[PluginMetaData]:
         self.plugins.clear()
 
         self._load_entry_point_plugins()
@@ -66,6 +61,10 @@ class PluginManager:
                 if name is None:
                     print(f"[WARN] Entry point '{ep.name}' is missing 'name'.")
                     continue
+                if "osdag_plugin_" in name:
+                    name = name[len("osdag_plugin_"):]
+                    meta["name"] = name
+
                 entry_point = getattr(module, "ENTRY_POINT", None)
                 entry_class = self._resolve_entry_class(
                     module, name, entry_point)
@@ -111,7 +110,7 @@ class PluginManager:
             except Exception as e:
                 print(f"[WARN] Could not load dev plugins: {e}")
 
-    def _resolve_entry_class(self, module: ModuleType, name: str, entry_path: str) -> Optional[object]:
+    def _resolve_entry_class(self, module: ModuleType, name: str, entry_path: str) -> object | None:
         if not entry_path:
             print(f"[WARN] Plugin '{name}' missing 'ENTRY_POINT'.")
             return None
@@ -127,6 +126,33 @@ class PluginManager:
                 f"[WARN] Could not resolve entry class '{entry_path}' for plugin '{name}': {e}")
             return None
 
+
+    def discover_online_plugins(self, channel: str) -> list[PluginMetaData]:
+        # Simulate discovering online plugins[sys.executable, "-m", "conda", "search", "--json", "-c", channel]
+        url = f"https://conda.anaconda.org/{channel}/label/main/noarch/repodata.json"
+        pkgs = self._fetch_channel_pkgs(url=url)
+        online_plugins = []
+        for pkg_filename, info in pkgs.items():
+            meta = {
+                "id": str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{info.get('name', '')}:{info.get('version', '')}")),
+                "name": info.get("name", ""),
+                "description": info.get("summary", "No description available."),
+                "authors": [info.get("author", "Unknown")],
+                "version": info.get("version", "1.0.0"),
+            }
+            online_plugins.append(PluginMetaData(**meta))
+        return online_plugins
+
+    def _fetch_channel_pkgs(self, url:str):
+        """Fetch and parse repodata.json from a conda channel and return packages."""
+        resp = requests.get(url, timeout=20)
+        resp.raise_for_status()
+        repo_data = resp.json()
+        pkgs = {}
+        pkgs.update(repo_data.get("packages", {}))
+        pkgs.update(repo_data.get("packages.conda", {}))
+        return pkgs
+        
     # ---------------------------
     # State Management
     # ---------------------------
@@ -142,12 +168,42 @@ class PluginManager:
             plugin.status = False
             self.state_manager.update_state(plugin, plugin.status)
 
-    def remove(self, plugin: PluginMetaData):
-        pass
+    def download_plugin(self, plugin: PluginMetaData) -> bool:
+        print(f"[INFO] Downloading plugin: {plugin.name}")
+
+        cmd = [sys.executable, "-m", "conda", "install", f"zehen-249::{plugin.name}", "-y"]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        print(result.stdout)
+        print(result.stderr)
+        if result.returncode == 0:
+            self.plugins.append(plugin)
+            return True
+        return False
+
+    def delete_plugin(self, plugin: PluginMetaData) -> bool:
+        print(f"[INFO] Deleting plugin: {plugin.name}")
+
+        cmd = [sys.executable, "-m", "conda", "remove", f"{plugin.name}", "-y"]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        print(result.stdout)
+        print(result.stderr)
+        if result.returncode == 0:
+            self.plugins = [p for p in self.plugins if p.id != plugin.id]
+            self.state_manager.delete_state(plugin)
+            return True
+        return False
+        
+    
 
     def get_plugin(self, plugin_id: str) -> PluginMetaData | None:
         for p in self.plugins:
             if p.id == plugin_id:
+                return p
+        return None
+
+    def get_plugin_by_name(self, plugin_name: str) -> PluginMetaData | None:
+        for p in self.plugins:
+            if p.name == plugin_name:
                 return p
         return None
 
@@ -183,6 +239,12 @@ class StateManager:
             prev = self.states.get(plugin.id)
             if prev != status:
                 self.states[plugin.id] = status
+                self._dirty = True
+
+    def delete_state(self, plugin: PluginMetaData) -> None:
+        with self._lock:
+            if plugin.id in self.states:
+                del self.states[plugin.id]
                 self._dirty = True
 
     def flush(self):

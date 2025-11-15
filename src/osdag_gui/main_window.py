@@ -1611,6 +1611,17 @@ class MainWindow(QMainWindow):
         id = self.update_module_count(backend)
         self.common_open_module(backend, "Base Plate Connection", id)
 
+    def open_plugin(self, plugin_name):
+        self.plugin_manager = QApplication.instance().plugin_manager
+        plugin = self.plugin_manager.get_plugin_by_name(plugin_name)
+        if plugin:
+            self.clear_layout(self.main_widget_layout)
+            plugin_instance = plugin.entry_class(parent=self)
+            self.main_widget_instance = plugin_instance
+            self.main_widget_layout.addWidget(plugin_instance)
+        else:
+            print(f"[WARN] Plugin '{plugin_name}' not found.")
+
     def open_home_page(self, module):
         self.clear_layout(self.main_widget_layout)
         home_window = HomeWindow()

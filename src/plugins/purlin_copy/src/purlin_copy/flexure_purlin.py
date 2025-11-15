@@ -30,13 +30,15 @@ from osdag_core.design_report.reportGenerator_latex import CreateLatex
 from osdag_core.utils.common.common_calculation import *
 from osdag_core.design_type.tension_member import *
 from osdag_core.utils.common.component import *
-
+from PySide6.QtWidgets import QWidget
 # TODO DEBUG
-class Flexure_Purlin(Member):
+class Flexure_Purlin(Member, QWidget):
 
-    def __init__(self):
+    def __init__(self, parent=None):
         # print(f"Here10")
-        super(Flexure_Purlin, self).__init__()
+        Member.__init__(self)
+        QWidget.__init__(self, parent=parent)
+        self.parent = parent
         self.hover_dict = {}
     ###############################################
     # Design Preference Functions Start

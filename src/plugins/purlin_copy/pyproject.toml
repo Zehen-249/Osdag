@@ -15,7 +15,7 @@ dependencies = [
 
 # Entry point group `osdag.plugins` tells Osdag where to find this plugin.
 [project.entry-points."osdag.plugins"]
-purlin_designer = "purlin_copy"
+purlin_copy = "purlin_copy"
 
 [tool.setuptools.packages.find]
 where = ["src"]
