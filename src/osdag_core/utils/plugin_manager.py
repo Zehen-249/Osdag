@@ -1,5 +1,5 @@
 import json
-import os, subprocess, sys, requests
+import os, subprocess, sys, requests, platform
 import tempfile
 from dataclasses import dataclass, field
 from threading import Lock
@@ -171,10 +171,19 @@ class PluginManager:
     def download_plugin(self, plugin: PluginMetaData) -> bool:
         print(f"[INFO] Downloading plugin: {plugin.name}")
 
-        cmd = [sys.executable, "-m", "conda", "install", f"zehen-249::{plugin.name}", "-y"]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        print(result.stdout)
-        print(result.stderr)
+        if not hasattr(self, 'conda_exe'):
+            self.conda_exe = os.environ["CONDA_EXE"]
+
+        cmd = [
+            self.conda_exe,
+            "install",
+            "--prefix", os.environ["CONDA_PREFIX"],
+            f"zehen-249::{plugin.name}",
+            "-y"
+        ]
+        result = subprocess.run(cmd,capture_output=True, text=True)
+        # print(result.stdout)
+        # print(result.stderr)
         if result.returncode == 0:
             self.plugins.append(plugin)
             return True
@@ -183,10 +192,19 @@ class PluginManager:
     def delete_plugin(self, plugin: PluginMetaData) -> bool:
         print(f"[INFO] Deleting plugin: {plugin.name}")
 
-        cmd = [sys.executable, "-m", "conda", "remove", f"{plugin.name}", "-y"]
+        if not hasattr(self, 'conda_exe'):
+            self.conda_exe = os.environ["CONDA_EXE"]
+
+        cmd = [
+            self.conda_exe,
+            "remove",
+            "--prefix", os.environ["CONDA_PREFIX"],
+            f"{plugin.name}",
+            "-y"
+        ]
         result = subprocess.run(cmd, capture_output=True, text=True)
-        print(result.stdout)
-        print(result.stderr)
+        # print(result.stdout)
+        # print(result.stderr)
         if result.returncode == 0:
             self.plugins = [p for p in self.plugins if p.id != plugin.id]
             self.state_manager.delete_state(plugin)
