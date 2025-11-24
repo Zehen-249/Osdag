@@ -211,6 +211,25 @@ class PluginManager:
             return True
         return False
         
+    def update_plugin(self, plugin: PluginMetaData) -> bool:
+        print(f"[INFO] Updating plugin: {plugin.name}")
+        
+        if not hasattr(self, 'conda_exe'):
+            self.conda_exe = os.environ["CONDA_EXE"]
+
+        cmd = [
+            self.conda_exe,
+            "update",
+            "--prefix", os.environ["CONDA_PREFIX"],
+            f"{plugin.name}",
+            "-y"
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        # print(result.stdout)
+        # print(result.stderr)
+        if result.returncode == 0:
+            return True
+        return False
     
 
     def get_plugin(self, plugin_id: str) -> PluginMetaData | None:

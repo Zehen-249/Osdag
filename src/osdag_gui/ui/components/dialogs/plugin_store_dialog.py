@@ -1,3 +1,4 @@
+from packaging import version
 from PySide6.QtWidgets import (
     QApplication, 
     QDialog, 
@@ -14,8 +15,7 @@ from PySide6.QtCore import Qt , Signal, Slot, QObject, QThread, QTimer, QMetaObj
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtGui import QIcon
 from osdag_gui.ui.components.dialogs.custom_titlebar import CustomTitleBar
-from osdag_gui.data.ui_data import Data
-from osdag_core.utils.plugin_manager import PluginManager, PluginMetaData
+from osdag_core.utils.plugin_manager import PluginMetaData
 
 class Worker(QObject):
     finished = Signal(bool)
@@ -39,6 +39,7 @@ class Worker(QObject):
 class PluginWidget(QWidget):
     download = Signal(PluginMetaData)
     delete = Signal(PluginMetaData)
+    update = Signal(PluginMetaData)
     def __init__(self, plugin: PluginMetaData, parent=None):
         super().__init__(parent)
         self.plugin = plugin
@@ -105,8 +106,9 @@ class PluginWidget(QWidget):
 
         self.btnDownload = QPushButton("Download")
         self.btnDelete = QPushButton("Delete")
+        self.btnUpdate = QPushButton("Update")
 
-        for btn in (self.btnDownload, self.btnDelete):
+        for btn in (self.btnDownload, self.btnDelete, self.btnUpdate):
             btn.setMinimumHeight(30)
             btn.setMinimumWidth(100)
             btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -132,6 +134,7 @@ class PluginWidget(QWidget):
         # --- Button Callbacks ---
         self.btnDelete.clicked.connect(self._emit_delete)
         self.btnDownload.clicked.connect(self._emit_download)
+        self.btnUpdate.clicked.connect(self._emit_update)
 
         content_min_width = self.content.sizeHint().width() + 150 
         self.setMinimumWidth(content_min_width)
@@ -141,6 +144,9 @@ class PluginWidget(QWidget):
 
     def _emit_delete(self):
         self.delete.emit(self.plugin)
+    
+    def _emit_update(self):
+        self.update.emit(self.plugin)
 
 
 
@@ -151,6 +157,7 @@ class PluginStoreDialog(QDialog):
         self.plugin_manager = QApplication.instance().plugin_manager
         self.plugins: list[PluginMetaData] = self.plugin_manager.discover_online_plugins(channel="zehen-249")
         self.local_plugins: list[PluginMetaData] = self.plugin_manager.discover_local_plugins()
+        self.updates_available = self._check_for_updates()
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setObjectName("PluginManagerDialog")
@@ -283,6 +290,43 @@ class PluginStoreDialog(QDialog):
             widget.name_label.setText(f"<b>{plugin.name}</b>")
             widget.btnDownload.setEnabled(True)
 
+    def update_plugin(self, plugin: PluginMetaData, widget: PluginWidget):
+        widget.btnUpdate.setEnabled(False)
+        widget.name_label.setText(f"<b>{plugin.name} (Updating...)</b>")
+        QApplication.processEvents()  # ensures repaint before thread starts
+
+        thread = QThread()
+        worker = Worker(self.plugin_manager.update_plugin, plugin)
+        worker.moveToThread(thread)
+
+        # Connect signals
+        thread.started.connect(lambda : self.start_worker(worker))
+        worker.finished.connect(lambda success: self._on_update_finished(success, widget, plugin))
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        
+
+        # Keep a reference so thread isn’t Garbagecollected
+        if not hasattr(self, "plugin_store_threads"):
+            self.plugin_store_threads = []
+        self.plugin_store_threads.append(thread)
+        thread.finished.connect(lambda: self.plugin_store_threads.remove(thread))
+        thread.start()
+    
+    def _on_update_finished(self, success, widget, plugin):
+        if success:
+            print(f"[INFO] Successfully updated plugin: {plugin.name}")
+            widget.btnUpdate.setVisible(False)
+            widget.btnDownload.setVisible(False)
+            widget.btnDelete.setVisible(True)
+            widget.btnDelete.setEnabled(True)
+            widget.name_label.setText(f"<b>{plugin.name} (Downloaded)</b>")
+        else:
+            print(f"[INFO] Failed to update plugin: {plugin.name}")
+            widget.name_label.setText(f"<b>{plugin.name} (Update Available)</b>")
+            widget.btnUpdate.setEnabled(True)
+
     def start_worker(self, worker):
             QMetaObject.invokeMethod(worker, "run", Qt.QueuedConnection)
         
@@ -301,24 +345,70 @@ class PluginStoreDialog(QDialog):
         self._populate_plugins()           
 
     def _populate_plugins(self):
-        if len(self.plugins) > 0:
-            for plugin in self.plugins:
-                pw = PluginWidget(plugin=plugin, parent=self)
-                pw.download.connect(lambda plugin, w=pw: self.download_plugin(plugin, w)) # capture pw by reference in lambda
-                pw.delete.connect(lambda plugin, w=pw: self.delete_plugin(plugin, w))
-                pw.btnDelete.setVisible(False)
-                pw.btnDelete.setEnabled(False)
-                pw.setFixedHeight(120)
-                pw.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-                is_downloaded = any(lp.id == plugin.id for lp in self.local_plugins)
-                if is_downloaded:
-                    pw.btnDownload.setEnabled(False)
+
+        latest = {}
+        for plugin in self.plugins:
+            if plugin.name not in latest:
+                latest[plugin.name] = plugin
+            else:
+                if version.parse(plugin.version) > version.parse(latest[plugin.name].version):
+                    latest[plugin.name] = plugin
+
+        self.plugins = list(latest.values())
+
+        for plugin in self.plugins:
+            pw = PluginWidget(plugin=plugin, parent=self)
+
+            pw.download.connect(lambda plugin, w=pw: self.download_plugin(plugin, w))
+            pw.delete.connect(lambda plugin, w=pw: self.delete_plugin(plugin, w))
+            pw.update.connect(lambda plugin, w=pw: self.update_plugin(plugin, w))
+
+            pw.setFixedHeight(120)
+            pw.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+            is_downloaded = any(lp.name == plugin.name for lp in self.local_plugins)
+
+            if is_downloaded:
+                is_update_available = any(up.name == plugin.name for up in self.updates_available)
+
+                if is_update_available:
+                    pw.name_label.setText(f"<b>{plugin.name} (Update Available)</b>")
                     pw.btnDownload.setVisible(False)
+                    pw.btnUpdate.setVisible(True)
+                    pw.btnUpdate.setEnabled(True)
                     pw.btnDelete.setVisible(True)
                     pw.btnDelete.setEnabled(True)
+                else:
                     pw.name_label.setText(f"<b>{plugin.name} (Downloaded)</b>")
+                    pw.btnDownload.setVisible(False)
+                    pw.btnUpdate.setVisible(False)
+                    pw.btnDelete.setVisible(True)
+                    pw.btnDelete.setEnabled(True)
 
-                self.pluginLayout.addWidget(pw)
+            else:
+                pw.name_label.setText(f"<b>{plugin.name}</b>")
+                pw.btnDownload.setVisible(True)
+                pw.btnDownload.setEnabled(True)
+                pw.btnUpdate.setVisible(False)
+                pw.btnDelete.setVisible(False)
+
+            self.pluginLayout.addWidget(pw)
+
+
+    def _check_for_updates(self):
+        installed_plugins = self.plugin_manager.discover_local_plugins()
+        online_plugins = self.plugin_manager.discover_online_plugins(channel="zehen-249")
+        updates_available = []
+        for installed in installed_plugins:
+            for online in online_plugins:
+                if online.name != installed.name:
+                    continue
+
+                if version.parse(online.version) > version.parse(installed.version):
+                    updates_available.append(online)
+
+
+        return updates_available
 
     def closeEvent(self, event):
         self.plugin_manager.state_manager.flush()
