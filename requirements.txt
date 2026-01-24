@@ -2,3 +2,5 @@ numpy
 pylatex
 pyyaml
 wheel
+pandas
+click
