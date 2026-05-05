@@ -37,6 +37,7 @@ Output_PDF/*
 **/ResourceFiles/Osi_Files/*
 **/ResourceFiles/last_designs/*
 **/ResourceFiles/html_page/*
+**/ResourceFiles/plugins/
 *.xlsx
 *.code-workspace
 **/testing_code/
