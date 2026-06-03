@@ -99,6 +99,25 @@ License: Apache License 2.0
 Link to Dependency: https://github.com/oneapi-src/oneTBB
 Link to License: https://www.apache.org/licenses/LICENSE-2.0
 
+Package: navcube 
+Source: geompy
+License: MIT License
+Link to Dependency: https://github.com/geompy/navcube
+Link to License: https://opensource.org/licenses/MIT
+
+Package: ifcopenshell 
+Source: conda-forge
+License: GNU Lesser General Public License v3 (LGPL-3.0)
+Link to Dependency: https://github.com/IfcOpenShell/IfcOpenShell
+Link to License: https://www.gnu.org/licenses/lgpl-3.0.html
+
+Package: lark 
+Source: conda-forge
+License: MIT License
+Link to Dependency: https://github.com/lark-parser/lark
+Link to License: https://opensource.org/licenses/MIT
+
+
 ----------------------------------------------------------------
 LaTeX Environment
 ----------------------------------------------------------------

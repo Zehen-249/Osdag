@@ -107,15 +107,8 @@ System Requirements:
 
 Install [Miniconda3](https://docs.anaconda.com/miniconda/install/) if not installed already. Select your operating system. Any other installation giving access to the latest conda version (e.g., Anaconda, miniforge, etc.) is also acceptable.
 
-**2. Install LaTeX Distribution**
 
-Install [MikTeX](https://miktex.org/howto/install-miktex) (for Windows) / [TeX Live](http://www.tug.org/texlive) (for Linux or other OS). This will be needed to generate reports.
-
-- **For MikTeX:** Make sure to select "Install for yourself". Once the installation is complete, open MikTeX Console, click on "Check for updates". Click "Update now" if there is any update available.
-
-- **For TeX Live:** The package `texlive-full` may have to be installed to avoid a "missing packages" error (more details below).
-
-**3. Open the Conda-Enabled Shell**
+**2. Open the Conda-Enabled Shell**
 
 Instructions are available on the Miniconda3 installations page.
 
@@ -123,15 +116,15 @@ Instructions are available on the Miniconda3 installations page.
 
 - **For Linux:** Open the terminal (use `Ctrl+Alt+T`)
 
-**4. Create Osdag Environment**
+**3. Create Osdag Environment**
 
 Run this command. This will create a new environment and install Osdag in it. It may take several minutes to get the prompt back.
 
 ```bash
-conda create -n osdag-env osdag::osdag -c conda-forge
+conda create -n osdag-env osdag::osdag -c conda-forge -c geompy
 ```
 
-**5. Run Osdag**
+**4. Run Osdag**
 
 To run Osdag, from the same shell, run these two commands. This will open the Osdag main page. 
 
@@ -142,19 +135,16 @@ osdag
 
 > **Note:** Running Osdag will create a folder "ResourceFiles" where this command is run. This folder will be used to store data for use in subsequent runs (for example, input values for various modules).
 
-**6. Verify Installation**
+**5. Verify Installation**
 
 Attempt a sample problem to make sure everything is working.
 
-**7. LaTeX Package Installation**
 
-During the first run, when creating the design report, some LaTeX packages may have to be installed before the report can be compiled. MikTeX will generally attempt to do this right then, but may fail if it was installed as an administrator. TeX Live is generally installed as an administrator (i.e., with sudo), so you may have to install `texlive-full` first.
+**6. Future Usage**
 
-**8. Future Usage**
+To run Osdag in the future, follow Step 4 from the same folder. This will not require an internet connection.
 
-To run Osdag in the future, follow Step 5 from the same folder. This will not require an internet connection (except for installing missing packages as described in Step 7).
-
-**9. Update Osdag**
+**7. Update Osdag**
 
 Occasionally, update Osdag as new updates may have been added since the install.
 
@@ -182,7 +172,7 @@ conda install mamba
 **3. Install Osdag using mamba**
 
 ```bash
-mamba install osdag::osdag -c conda-forge
+mamba install osdag::osdag -c conda-forge -c geompy
 ```
 
 ---
