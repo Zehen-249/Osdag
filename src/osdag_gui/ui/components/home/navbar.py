@@ -82,7 +82,7 @@ class CustomButton(QPushButton):
 
 class VerticalMenuBar(QWidget):
     nav_bar_trigger = Signal(object, object)
-    def __init__(self, data: dict, icons: dict):
+    def __init__(self, data: dict, icons: dict, make_plugins: bool = False):
         super().__init__()
         # Ensures automatic deletion when closed
         self.setAttribute(Qt.WA_DeleteOnClose, True)
@@ -122,6 +122,32 @@ class VerticalMenuBar(QWidget):
 
         names = list(data.keys())
         for name in names:
+            if name == "Plugins":
+                if make_plugins:
+                    plugins_label = QLabel("Plugins")
+                    plugins_label.setStyleSheet("""
+                        QLabel {
+                            color: black;
+                            font-size: 14px;
+                            font-weight: bold;
+                            padding: 8px 6px 12px 6px;
+                        }
+                    """)
+
+                    self.main_layout.addWidget(plugins_label)
+
+                    separator = QFrame()
+                    separator.setFrameShape(QFrame.Shape.HLine)
+                    separator.setFrameShadow(QFrame.Shadow.Plain)
+                    separator.setFixedHeight(1)
+                    separator.setStyleSheet("""
+                        QFrame {
+                            background-color: #90AF13;
+                            border: none;
+                        }
+                    """)
+                    self.main_layout.addWidget(separator)
+                continue
             icon = icons.get(name)
             # If list is empty, Grey It
             if isinstance(data.get(name), list) and len(data.get(name))<=0:

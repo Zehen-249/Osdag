@@ -184,6 +184,7 @@ class HomeWindow(QWidget):
     
         dat = Data()
         self.menu_bar_data = dat.MODULES
+        active_plugins = dat.PLUGINS
         floating_navbar = dat.FLOATING_NAVBAR
         navbar_icons = dat.NAVBAR_ICONS
 
@@ -205,7 +206,7 @@ class HomeWindow(QWidget):
         main_h_layout.setSpacing(0)
 
         # Left Navigation Bar
-        self.nav_bar = VerticalMenuBar(self.menu_bar_data, navbar_icons)
+        self.nav_bar = VerticalMenuBar(self.menu_bar_data, navbar_icons, len(active_plugins) > 0)
         self.nav_bar.nav_bar_trigger.connect(self.nav_trigger)
 
         main_h_layout.addWidget(self.nav_bar, 2)

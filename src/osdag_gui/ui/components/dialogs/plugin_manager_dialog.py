@@ -17,65 +17,31 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtSvgWidgets import QSvgWidget
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QFont, QIcon
 from osdag_gui.ui.components.dialogs.custom_titlebar import CustomTitleBar
 from osdag_gui.data.ui_data import Data
 from osdag_core.utils.plugin_manager import PluginManager, PluginMetaData
 from osdag_gui.ui.components.dialogs.plugin_store_dialog import PluginStoreDialog
 from osdag_gui.ui.components.dialogs.custom_messagebox import CustomMessageBox, MessageBoxType
 
-
-class StatusIndicator(QWidget):
-    def __init__(self, plugin: PluginMetaData = None, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
-        layout.setSpacing(5)
-
-        self.circle: QLabel = QLabel()
-        self.circle.setFixedSize(12, 12)
-        self.circle.setStyleSheet("border-radius: 6px; background-color: red;")
-
-        self.text: QLabel = QLabel("Inactive")
-        self.text.setStyleSheet(
-            f"font-size: 9pt; font-weight: bold; color: red;")
-
-        layout.addWidget(self.circle)
-        layout.addWidget(self.text)
-
-        self.update_status(plugin.status if plugin else False)
-
-    def update_status(self, status: bool) -> None:
-        if status:
-            self.circle.setStyleSheet(
-                "border-radius: 6px; background-color: green;")
-            self.text.setText("Active")
-            self.text.setStyleSheet("color: green;")
-        else:
-            self.circle.setStyleSheet(
-                "border-radius: 6px; background-color: red;")
-            self.text.setText("Inactive")
-            self.text.setStyleSheet("color: red;")
-
-
 class PluginWidget(QWidget):
     activate = Signal(PluginMetaData)
     deactivate = Signal(PluginMetaData)
-    delete = Signal(PluginMetaData)
 
     def __init__(self, plugin: PluginMetaData, parent=None):
         super().__init__(parent)
+        self.setObjectName("PluginWidget")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.plugin = plugin
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(12)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
 
         self.setStyleSheet("""
-            PluginWidget {
-                border: 1px solid #d0d0d0;
-                border-radius: 6px;
+            QWidget#PluginWidget {
                 background-color: #ffffff;
+                border: 2px solid #c8c8c8;
+                border-radius: 6px;
             }
         """)
 
@@ -86,14 +52,31 @@ class PluginWidget(QWidget):
         header_layout.setSpacing(5)
 
         self.name_label = QLabel(
-            f"{'<b>'+plugin.name+'</b> (Dev Plugin)' if plugin.is_dev else '<b>'+plugin.name+'</b>'}")
+            f"<b>{plugin.name.title()} v{plugin.version}</b>"
+            f"{' (Dev Plugin)' if plugin.is_dev else ''}"
+        )
         self.name_label.setStyleSheet(
             "font-weight: bold; font-size: 12pt; color: #90AF13;")
-        self.status_indicator = StatusIndicator(plugin)
 
-        header_layout.addWidget(self.name_label, alignment=Qt.AlignLeft)
+        # Status indicator
+        self.status_layout = QHBoxLayout()
+        self.status_layout.setContentsMargins(0, 0, 0, 0)
+        self.status_layout.setSpacing(6)
+
+        self.status_circle = QLabel()
+        self.status_circle.setFixedSize(12, 12)
+
+        self.status_text = QLabel()
+        self.status_text.setStyleSheet(
+            "font-size: 9pt; font-weight: bold;"
+        )
+
+        self.status_layout.addWidget(self.status_circle)
+        self.status_layout.addWidget(self.status_text)
+
+        header_layout.addWidget(self.name_label)
         header_layout.addStretch()
-        header_layout.addWidget(self.status_indicator, alignment=Qt.AlignRight)
+        header_layout.addLayout(self.status_layout)
 
         layout.addWidget(header)
 
@@ -106,37 +89,41 @@ class PluginWidget(QWidget):
         # LEFT SIDE (description)
         self.content = QTextEdit()
         self.content.setReadOnly(True)
-        content_text = f"{'<b>Author</b>' if len(self.plugin.authors) == 1 else '<b>Authors</b>'}: ({', '.join(author for author in self.plugin.authors)})"
+        content_text = f"{'<b>Author</b>' if len(self.plugin.authors) == 1 else '<b>Authors</b>'}: ({', '.join(author.title() for author in self.plugin.authors)})"
         content_text += f"<br><b>Description</b>: {self.plugin.description}"
         self.content.setText(content_text)
-        self.content.setMinimumHeight(100)
-        self.content.setMaximumHeight(200)
+        self.content.setMinimumHeight(70)
+        self.content.setMaximumHeight(120)
         self.content.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.content.setStyleSheet("""
             QTextEdit {
                 border: 1px solid #e0e0e0;
                 border-radius: 4px;
+                padding: 4px;
                 font-size: 9.5pt;
-                color: #444;
-                background: #fafafa;
+                color: #444444;
+                background: #FAFAFA;
             }
         """)
         content_layout.addWidget(self.content, stretch=3)
 
-       # RIGHT SIDE (buttons)
-        btn_layout = QVBoxLayout()
-        btn_layout.setContentsMargins(4, 4, 4, 4)
-        btn_layout.setSpacing(10)
-
+        # -------------------------
+        # Buttons
+        # -------------------------
         self.btnActivate = QPushButton("Activate")
         self.btnDeactivate = QPushButton("Deactivate")
-        self.btnDelete = QPushButton("Delete")
 
-        for btn in (self.btnActivate, self.btnDeactivate, self.btnDelete):
-            btn.setMinimumHeight(30)
-            btn.setMinimumWidth(100)
-            btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        btn_layout = QVBoxLayout()
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.setSpacing(6)
+
+        for btn in (
+            self.btnActivate,
+            self.btnDeactivate
+        ):
+            btn.setFixedSize(100, 30)
+
             btn.setStyleSheet("""
                 QPushButton {
                     background-color: #90AF13;
@@ -145,39 +132,86 @@ class PluginWidget(QWidget):
                     border-radius: 5px;
                     font-size: 9pt;
                     font-weight: bold;
-                    margin: 4px;
                 }
-                QPushButton:hover { background-color: #7A9611; }
-                QPushButton:pressed { background-color: #6B850F; }
-            """)
-            btn_layout.addWidget(btn, 0, Qt.AlignRight)
 
-        content_layout.addLayout(btn_layout, stretch=1)
+                QPushButton:hover {
+                    background-color: #7A9611;
+                }
+
+                QPushButton:pressed {
+                    background-color: #6B850F;
+                }
+
+                QPushButton:disabled {
+                    background-color: #B8C58A;
+                    color: #F5F5F5;
+                }
+            """)
+
+            btn_layout.addWidget(btn)
+
+        btn_layout.addStretch()
+
+        self.set_status(plugin.status)
+        content_layout.addLayout(btn_layout)
 
         layout.addWidget(content)
 
         # --- Button Callbacks ---
         self.btnActivate.clicked.connect(self._emit_activate)
         self.btnDeactivate.clicked.connect(self._emit_deactivate)
-        self.btnDelete.clicked.connect(self._emit_delete)
 
         content_min_width = self.content.sizeHint().width() + 150
         self.setMinimumWidth(content_min_width)
 
+    def set_status(self, status: bool) -> None:
+        """Update status indicator and action button visibility."""
+
+        if status:
+            self.status_circle.setStyleSheet("""
+                background-color: #008000;
+                border-radius: 6px;
+            """)
+
+            self.status_text.setText("Activated")
+            self.status_text.setStyleSheet("""
+                color: #008000;
+                font-size: 9pt;
+                font-weight: bold;
+            """)
+
+            self.btnActivate.hide()
+            self.btnDeactivate.show()
+
+        else:
+            self.status_circle.setStyleSheet("""
+                background-color: #C62828;
+                border-radius: 6px;
+            """)
+
+            self.status_text.setText("Deactivated")
+            self.status_text.setStyleSheet("""
+                color: #C62828;
+                font-size: 9pt;
+                font-weight: bold;
+            """)
+
+            self.btnActivate.show()
+            self.btnDeactivate.hide()
+
+
     def _emit_activate(self):
         if not self.plugin.status:
             self.plugin.status = not self.plugin.status
-            self.status_indicator.update_status(self.plugin.status)
+            self.set_status(self.plugin.status)
             self.activate.emit(self.plugin)
 
     def _emit_deactivate(self):
         if self.plugin.status:
             self.plugin.status = not self.plugin.status
-            self.status_indicator.update_status(self.plugin.status)
+            self.set_status(self.plugin.status)
             self.deactivate.emit(self.plugin)
 
-    def _emit_delete(self):
-        self.delete.emit(self.plugin)
 
 
 class PluginManagerDialog(QDialog):
@@ -192,20 +226,68 @@ class PluginManagerDialog(QDialog):
         self.app = QApplication.instance()
         self.main_window = self.app.main_window
 
-        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setWindowFlag(Qt.FramelessWindowHint, True)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setObjectName("PluginManagerDialog")
         self.setWindowIcon(QIcon(":/images/osdag_logo.png"))
-        self.setFixedSize(720, 600)
+
+        # Size dialog relative to parent window
+        if parent is not None:
+            parent_size = parent.size()
+
+            width = int(parent_size.width() * 0.80)
+            height = int(parent_size.height() * 0.80)
+
+            self.resize(width, height)
+
+            self.setMinimumSize(
+                min(800, parent_size.width()),
+                min(600, parent_size.height())
+            )
+
+            # Center over parent
+            parent_geometry = parent.frameGeometry()
+            self.move(
+                parent_geometry.center()
+                - self.rect().center()
+            )
+        else:
+            self.resize(1000, 700)
+            self.setMinimumSize(800, 600)
 
         # Layout and style
         self.setStyleSheet("""
-            QDialog#PluginManagerDialog { background-color: #ffffff; border: 1px solid #90AF13; }
-            QWidget#ContentWidget { background-color: #ffffff; }
-            QPushButton { background-color: #90AF13; color: white; border: none; border-radius: 5px;
-                          padding: 5px 20px; font-size: 12px; font-weight: bold; }
-            QPushButton:hover { background-color: #7A9611; }
-            QPushButton:pressed { background-color: #6B850F; }
+            QDialog#PluginManagerDialog {
+                background-color: #ffffff;
+                border: 2px solid #90AF13;
+            }
+
+            QWidget#ContentWidget {
+                background-color: #ffffff;
+            }
+
+            QPushButton {
+                background-color: #90AF13;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 5px 20px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+
+            QPushButton:hover {
+                background-color: #7A9611;
+            }
+
+            QPushButton:pressed {
+                background-color: #6B850F;
+            }
+
+            QPushButton:disabled {
+                background-color: #B8C58A;
+                color: #F5F5F5;
+            }
         """)
 
         mainLayout = QVBoxLayout(self)
@@ -225,21 +307,129 @@ class PluginManagerDialog(QDialog):
         contentLayout.setSpacing(10)
 
         # Logo
-        self.logoLabel = QSvgWidget(":/vectors/Osdag_light.svg", self)
-        self.logoLabel.setMaximumHeight(100)
-        self.logoLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        contentLayout.addWidget(self.logoLabel, 0, Qt.AlignLeft)
+        self.logoLabel = QSvgWidget(
+            ":/vectors/Osdag_light.svg",
+            self
+        )
+
+        logo_height = max(
+            55,
+            min(85, int(self.height() * 0.10))
+        )
+
+        svg_size = self.logoLabel.renderer().defaultSize()
+
+        if not svg_size.isEmpty() and svg_size.height() > 0:
+            logo_width = int(
+                svg_size.width()
+                * logo_height
+                / svg_size.height()
+            )
+
+            self.logoLabel.setFixedSize(
+                logo_width,
+                logo_height
+            )
+        else:
+            self.logoLabel.setFixedSize(
+                500,
+                logo_height
+            )
+
+        contentLayout.addWidget(
+            self.logoLabel,
+            0,
+            Qt.AlignLeft
+        )
 
         # Scroll area for plugins
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(
-            "QScrollArea { border: 0.5px solid black; background-color: #F0F0F0; }")
+        scroll.setFrameShape(QScrollArea.NoFrame)
+
+        scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: #F4F4F4;
+            }
+
+            QScrollArea > QWidget > QWidget {
+                background: #F4F4F4;
+            }
+
+            /* Vertical scrollbar */
+            QScrollBar:vertical {
+                background: #F4F4F4;
+                width: 8px;
+                margin: 0px;
+                border: none;
+            }
+
+            QScrollBar::handle:vertical {
+                background: #B8C58A;
+                min-height: 35px;
+                border-radius: 4px;
+            }
+
+            QScrollBar::handle:vertical:hover {
+                background: #90AF13;
+            }
+
+            QScrollBar::handle:vertical:pressed {
+                background: #7A9611;
+            }
+
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {
+                height: 0px;
+                border: none;
+                background: none;
+            }
+
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {
+                background: transparent;
+            }
+
+            /* Horizontal scrollbar */
+            QScrollBar:horizontal {
+                background: #F4F4F4;
+                height: 8px;
+                border: none;
+            }
+
+            QScrollBar::handle:horizontal {
+                background: #B8C58A;
+                min-width: 35px;
+                border-radius: 4px;
+            }
+
+            QScrollBar::handle:horizontal:hover {
+                background: #90AF13;
+            }
+
+            QScrollBar::handle:horizontal:pressed {
+                background: #7A9611;
+            }
+
+            QScrollBar::add-line:horizontal,
+            QScrollBar::sub-line:horizontal {
+                width: 0px;
+                border: none;
+            }
+
+            QScrollBar::add-page:horizontal,
+            QScrollBar::sub-page:horizontal {
+                background: transparent;
+            }
+        """)
         contentLayout.addWidget(scroll)
 
         # Container for plugin widgets
         self.pluginContainer = QWidget()
         self.pluginLayout = QVBoxLayout(self.pluginContainer)
+        self.pluginLayout.setContentsMargins(10, 10, 10, 10)
+        self.pluginLayout.setSpacing(12)
         self.pluginLayout.setAlignment(Qt.AlignTop)
         scroll.setWidget(self.pluginContainer)
 
@@ -253,14 +443,7 @@ class PluginManagerDialog(QDialog):
                     self.activate_plugin(plugin)
                 else:
                     print("     [INFO] Status: Inactive")
-                pw = PluginWidget(plugin=plugin, parent=self)
-                pw.activate.connect(self.plugin_manager.activate)
-                pw.activate.connect(self.activate_plugin)
-                pw.deactivate.connect(self.plugin_manager.deactivate)
-                pw.deactivate.connect(self.deactivate_plugin)
-                pw.delete.connect(self.plugin_manager.delete_plugin)
-                pw.setFixedHeight(120)
-                pw.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                pw = self.create_plugin_widget(plugin)
                 self.pluginLayout.addWidget(pw)
             print("\n=====================================\n")
 
@@ -269,11 +452,22 @@ class PluginManagerDialog(QDialog):
         self.storeButton.setFixedHeight(30)
         self.storeButton.setStyleSheet("""
             QPushButton {
-                background-color: #0078D7; color: white; border: none; border-radius: 5px;
-                padding: 5px 20px; font-size: 12px; font-weight: bold;
+                background-color: #90AF13;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 5px 20px;
+                font-size: 12px;
+                font-weight: bold;
             }
-            QPushButton:hover { background-color: #0063B1; }
-            QPushButton:pressed { background-color: #004E8C; }
+
+            QPushButton:hover {
+                background-color: #7A9611;
+            }
+
+            QPushButton:pressed {
+                background-color: #6B850F;
+            }
         """)
         self.storeButton.clicked.connect(self.open_store_dialog)
 
@@ -306,25 +500,21 @@ class PluginManagerDialog(QDialog):
 
     def activate_plugin(self, plugin: PluginMetaData):
         plugin = self.plugin_manager.get_plugin(plugin.id)
-        if plugin and plugin.name.title() not in self.active_plugins.keys():
-            self.active_plugins[plugin.name.title()] = plugin.module_tree
-            self.data_modules.update({plugin.name.title(): plugin.module_tree})
-            self.data_navbar_icons.update({plugin.name.title(): plugin.icons})
+        if plugin and plugin.name not in self.active_plugins.keys():
+            self.active_plugins[plugin.name] = plugin.module_tree
+            self.data_modules.update({plugin.name: plugin.module_tree})
+            self.data_navbar_icons.update({plugin.name: plugin.icons})
 
     def deactivate_plugin(self, plugin: PluginMetaData):
-        self.active_plugins.pop(plugin.name.title(), None)
-        self.data_modules.pop(plugin.name.title(), None)
-        self.data_navbar_icons.pop(plugin.name.title(), None)
+        self.active_plugins.pop(plugin.name, None)
+        self.data_modules.pop(plugin.name, None)
+        self.data_navbar_icons.pop(plugin.name, None)
 
-    def delete_plugin(self, plugin: PluginMetaData):
-        self.deactivate_plugin(plugin)
-        self.plugin_manager.delete_plugin(plugin)
-        self.refresh_plugin()
 
     def open_store_dialog(self):
         # print("[PLUGIN STORE] Opening Plugin Store Dialog...")
-        store_dialog = PluginStoreDialog()
-        store_dialog.exec()
+        store_dialog = PluginStoreDialog(parent=self)
+        store_dialog.show()
 
     def open_dev_paths_dialog(self):
 
@@ -335,6 +525,25 @@ class PluginManagerDialog(QDialog):
 
         self.dev_paths_dialog.refresh_plugins.connect(self.refresh_plugins)
         self.dev_paths_dialog.show()
+
+    def create_plugin_widget(self, plugin):
+        pw = PluginWidget(plugin=plugin, parent=self)
+
+        pw.activate.connect(self.plugin_manager.activate)
+        pw.activate.connect(self.activate_plugin)
+
+        pw.deactivate.connect(self.plugin_manager.deactivate)
+        pw.deactivate.connect(self.deactivate_plugin)
+
+
+        # IMPORTANT:
+        # Let the widget determine its own required height.
+        pw.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Minimum
+        )
+
+        return pw
 
     def refresh_plugins(self):
         self.plugin_manager.dev_plugins_paths = self.plugin_manager.state_manager.get_plugin_paths()
@@ -348,14 +557,7 @@ class PluginManagerDialog(QDialog):
         # Re-add plugin widgets
         if len(self.plugins) > 0:
             for plugin in self.plugins:
-                pw = PluginWidget(plugin=plugin, parent=self)
-                pw.activate.connect(self.plugin_manager.activate)
-                pw.activate.connect(self.activate_plugin)
-                pw.deactivate.connect(self.plugin_manager.deactivate)
-                pw.deactivate.connect(self.deactivate_plugin)
-                pw.delete.connect(self.plugin_manager.delete_plugin)
-                pw.setFixedHeight(120)
-                pw.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                pw = self.create_plugin_widget(plugin)
                 self.pluginLayout.addWidget(pw)
 
     def closeEvent(self, event):
@@ -374,21 +576,48 @@ class DevelopmentPluginPathsDialog(QDialog):
         super().__init__(parent)
 
         self.plugin_manager = plugin_manager
-        self.setWindowFlags(Qt.Window)
+
+        # --------------------------------------------------
+        # Window
+        # --------------------------------------------------
+        self.setWindowFlag(Qt.FramelessWindowHint, True)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setObjectName("DevelopmentPluginPathsDialog")
         self.setFixedSize(600, 400)
 
         self.setStyleSheet("""
-            QDialog {
+            QDialog#DevelopmentPluginPathsDialog {
                 background-color: white;
                 border: 1px solid #90AF13;
             }
 
-            QListWidget {
-                border: 1px solid #c0c0c0;
+            QWidget#contentWidget {
+                background-color: #F4F4F4;
+            }
+
+            QWidget#footer {
                 background-color: white;
+            }
+
+            QLabel {
+                color: #222222;
+            }
+
+            QListWidget {
+                background-color: white;
+                border: 1px solid #C8C8C8;
+                border-radius: 3px;
                 padding: 4px;
+                font-size: 9pt;
+            }
+
+            QListWidget::item {
+                padding: 4px;
+            }
+
+            QListWidget::item:selected {
+                background-color: #90AF13;
+                color: white;
             }
 
             QPushButton {
@@ -396,8 +625,9 @@ class DevelopmentPluginPathsDialog(QDialog):
                 color: white;
                 border: none;
                 border-radius: 5px;
-                padding: 5px 20px;
-                font-size: 12px;
+                min-height: 30px;
+                padding: 0 18px;
+                font-size: 9pt;
                 font-weight: bold;
             }
 
@@ -410,44 +640,66 @@ class DevelopmentPluginPathsDialog(QDialog):
             }
         """)
 
-        # =====================
-        # Main Layout
-        # =====================
+        # ==================================================
+        # Main layout
+        # ==================================================
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(1, 1, 1, 1)
         main_layout.setSpacing(0)
 
-        # =====================
-        # Title Bar
-        # =====================
+        # ==================================================
+        # Title bar
+        # ==================================================
 
         self.title_bar = CustomTitleBar()
         self.title_bar.setTitle("Development Plugin Repositories")
 
         main_layout.addWidget(self.title_bar)
 
-        # =====================
-        # Content
-        # =====================
+        # ==================================================
+        # Content area
+        # ==================================================
 
-        content_layout = QVBoxLayout()
+        content_widget = QWidget()
+        content_widget.setObjectName("contentWidget")
+
+        content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(10, 10, 10, 10)
+        content_layout.setSpacing(8)
+
+        # --------------------------------------------------
+        # Heading
+        # --------------------------------------------------
 
         label = QLabel("Configured Plugin Repository Locations")
-        label.setStyleSheet("font-size: 11pt; font-weight: bold;")
+        label.setStyleSheet("""
+            font-size: 11pt;
+            font-weight: bold;
+            color: #222222;
+        """)
 
         content_layout.addWidget(label)
 
+        # --------------------------------------------------
+        # Repository list
+        # --------------------------------------------------
+
         self.path_list = QListWidget()
+        self.path_list.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding
+        )
 
         content_layout.addWidget(self.path_list)
 
-        # =====================
-        # Buttons
-        # =====================
+        # --------------------------------------------------
+        # Repository buttons
+        # --------------------------------------------------
 
         path_button_layout = QHBoxLayout()
+        path_button_layout.setContentsMargins(0, 0, 0, 0)
+        path_button_layout.setSpacing(6)
 
         self.add_button = QPushButton("Add Repository")
         self.remove_button = QPushButton("Remove Repository")
@@ -458,22 +710,30 @@ class DevelopmentPluginPathsDialog(QDialog):
 
         content_layout.addLayout(path_button_layout)
 
-        # Bottom Buttons
+        main_layout.addWidget(content_widget)
 
-        bottom_layout = QHBoxLayout()
-        bottom_layout.addStretch()
+        # ==================================================
+        # Bottom footer
+        # ==================================================
+
+        footer = QWidget()
+        footer.setObjectName("footer")
+        footer.setFixedHeight(48)
+
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(8, 6, 8, 6)
+        footer_layout.setSpacing(6)
+
+        footer_layout.addStretch()
 
         self.close_button = QPushButton("Close")
+        footer_layout.addWidget(self.close_button)
 
-        bottom_layout.addWidget(self.close_button)
+        main_layout.addWidget(footer)
 
-        content_layout.addLayout(bottom_layout)
-
-        main_layout.addLayout(content_layout)
-
-        # =====================
+        # ==================================================
         # Signals
-        # =====================
+        # ==================================================
 
         self.add_button.clicked.connect(self.add_repository)
         self.remove_button.clicked.connect(self.remove_repository)
@@ -514,7 +774,7 @@ class DevelopmentPluginPathsDialog(QDialog):
 
         if item is None:
             CustomMessageBox(
-                title="Please select a repository.",
+                title="Please select a repository containing plugin init file.",
                 text='No Selection',
                 dialogType=MessageBoxType.Information
             ).exec()

@@ -58,7 +58,7 @@ class SidebarIconButton(QPushButton):
         self.tooltip_show_timer.timeout.connect(self._show_custom_tooltip)
 
     def _load_icon(self, path, icon_type=""):
-        return QIcon(path)
+        return QIcon(str(path))
 
     def paintEvent(self, event):
         if not self.is_selected:

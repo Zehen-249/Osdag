@@ -188,7 +188,7 @@ class ProjectItem(QFrame):
 
         # Module Key
         key = self.project_data.get(MODULE_KEY)
-        parent_navbar = MODULE_MAP.get(key)[3]
+        parent_navbar = MODULE_MAP.get(key)[3] if MODULE_MAP.get(key) else None
         # Replacing since these icons are in recents folder
         icon_path = Data().NAVBAR_ICONS.get(parent_navbar)[0].replace("nav_icons", "recents")
         number_label.setPixmap(QIcon(icon_path).pixmap(QSize(24, 24)))
@@ -354,7 +354,7 @@ class ModuleItem(QFrame):
         self.icon_label.setObjectName("moduleIcon")
         # Module Key
         key = self.module_data.get(MODULE_KEY)
-        parent_navbar = MODULE_MAP.get(key)[3]
+        parent_navbar = MODULE_MAP.get(key)[3] if MODULE_MAP.get(key) else None
         # Replacing since these icons are in recents folder
         icon_path = Data().NAVBAR_ICONS.get(parent_navbar)[0].replace("nav_icons", "recents")
         self.icon_label.setPixmap(QIcon(icon_path).pixmap(QSize(24, 24)))
