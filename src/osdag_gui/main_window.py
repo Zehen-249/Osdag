@@ -12,10 +12,12 @@ Main application window for Osdag GUI.
 Handles tab management, docking icons, and main window controls.
 """
 
-from .resources import resources_rc
+from osdag_gui.plugin.widget_plugin import WidgetPlugin
+from osdag_gui.plugin.window_plugin import WindowPlugin
+import osdag_gui.resources.resources_rc
 
 import sys, sqlite3
-import os, yaml
+import os, yaml, importlib
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QApplication, QFileDialog,
@@ -31,8 +33,9 @@ from .ui.components.floating_nav_bar import SidebarWidget
 from .ui.components.dialogs.custom_messagebox import CustomMessageBox, MessageBoxType
 from .ui.components.dialogs.settings import SettingsDialog
 
-from .data.database.database_config import PROJECT_PATH, ID, update_project_path, delete_project_record
-from .data.database.database_config import get_module_function
+from osdag_gui.data.ui_data import Data
+from osdag_gui.data.database.database_config import PROJECT_PATH, ID, update_project_path, delete_project_record
+from osdag_gui.data.database.database_config import get_module_function
 from osdag_core.Common import (
     KEY_DISP_FINPLATE, KEY_DISP_CLEATANGLE, KEY_DISP_ENDPLATE, KEY_DISP_SEATED_ANGLE,
     KEY_DISP_BCENDPLATE, KEY_DISP_BEAMCOVERPLATE, KEY_DISP_BEAMCOVERPLATEWELD, KEY_DISP_BB_EP_SPLICE,
@@ -211,8 +214,8 @@ class MainWindow(QMainWindow):
         screen = QGuiApplication.primaryScreen()
         screen_size = screen.availableGeometry()
 
-        app = QApplication.instance()
-        self.theme = app.theme_manager
+        self.app = QApplication.instance()
+        self.theme = self.app.theme_manager
 
         screen_width = screen_size.width()
         screen_height = screen_size.height()
@@ -471,10 +474,10 @@ class MainWindow(QMainWindow):
         self.sidebar_animation.start()
 
     def _update_sidebar_visibility(self):
-        """Show the floating sidebar only on module (CustomWindow) tabs, hide it on the Home tab."""
+        """Show the floating sidebar only on module (Not Home) tabs, hide it on the Home tab."""
         if not hasattr(self, 'sidebar'):
             return
-        if isinstance(self.main_widget_instance, CustomWindow):
+        if not isinstance(self.main_widget_instance, HomeWindow):
             self.sidebar.resize_sidebar(self.width(), self.height())
             self.sidebar_y = self.title_bar.height() + (self.tab_widget.height() - self.sidebar.height()) // 2
             self.sidebar_animation.stop()
@@ -934,7 +937,10 @@ class MainWindow(QMainWindow):
     def _check_design_done(self, index) -> bool:
         module = self._get_template_instance(index)
         if hasattr(module, 'backend'):
-            return module.backend.design_status
+            try:
+                return module.backend.design_status
+            except AttributeError:
+                return True
         else:
             return False
     
@@ -1406,9 +1412,57 @@ class MainWindow(QMainWindow):
         super().show()
 
     # ============= Resize implementation ends ===============
+    def find_module(self, module_key, plugins_dict):
+        for plugin_name, module_tree in plugins_dict.items():
+
+            result = self.search_tree(module_key, module_tree)
+
+            if result is not None:
+                return {
+                    "plugin": plugin_name,
+                    **result
+                }
+
+        return None
+
+    def search_tree(self, module_key, tree, path=None):
+        if path is None:
+            path = []
+
+        # List of module tuples
+        if isinstance(tree, list):
+
+            for module in tree:
+
+                if not isinstance(module, tuple):
+                    continue
+
+                # (key, name, image)
+                if len(module) >= 2 and module[0] == module_key:
+                    return {
+                        "path": path,
+                        "module": module
+                    }
+
+            return None
+
+        if isinstance(tree, dict):
+
+            for category, subtree in tree.items():
+
+                result = self.search_tree(
+                    module_key,
+                    subtree,
+                    path + [category]
+                )
+                if result is not None:
+                    return result
+
+        return None
 
     def handle_card_open_clicked(self, card_title):
         # print(f"[INFO] Card opened: {card_title}")
+
 
         #----------Shear-Connections--------------
         if card_title == KEY_DISP_FINPLATE:
@@ -1478,11 +1532,27 @@ class MainWindow(QMainWindow):
         elif card_title == KEY_DISP_BASE_PLATE:
             self.open_base_plate_conn()
 
+        else:
+            # -----------Plugins-----------------------------
+            print(f"[INFO] Attempting to open plugin for card '{card_title}'")
+            module = self.find_module(card_title, Data().PLUGINS)
+            if module:
+                print(f"[INFO] Found module for card '{card_title}': {module}")
+                self.common_open_plugin(module)
+            else:
+                print(f"[WARNING] No module found for card '{card_title}'")
+                CustomMessageBox(
+                    title="Module Not Found",
+                    text=f"No module found for '{card_title}'.\nPlease check the plugin configuration.",
+                    buttons=["OK"],
+                    dialogType=MessageBoxType.Warning
+                ).show()
+
     # TO update count of opened module in current session
     def update_module_count(self, backend:object) -> int:
         key = backend.module_name()
         # Increment module count
-        self.module_count[key] += 1
+        self.module_count[key] = self.module_count.get(key, -2) + 1
         return self.module_count[key]
 
     #-------------Functions-to-load-modules-in-Tabwidget-START---------------------------
@@ -1525,7 +1595,195 @@ class MainWindow(QMainWindow):
         
         index = self.tab_bar.currentIndex()
         self.tab_bar.setTabText(index, title)
+
+    def common_open_plugin(self, module_info: dict) -> None:
+            plugin_name = module_info.get("plugin")
+            plugin_obj = self.app.plugin_manager.get_plugin_by_name(plugin_name)
+            if plugin_obj is None:
+                print(f"[ERROR] Plugin '{plugin_name}' not found by plugin manager.")
+                CustomMessageBox(
+                    title="Plugin Not Found",
+                    text=f"Plugin '{plugin_name}' not found.\nPlease check the plugin configuration.",
+                    buttons=["OK"],
+                    dialogType=MessageBoxType.Warning
+                ).show()
+                return
+            # if plugin_obj.type == WidgetPlugin:
+            #     key, name, _ = module_info.get("module")
+            #     plugin_obj.open(key, name, self)
+            # if plugin_obj.type == WindowPlugin:
+            #     key, name, _ = module_info.get("module")
+            #     backend_path = f"{plugin_obj.backend}:{plugin_obj.entry_point}"
+            #     self.open_window_plugin(backend_path)
+            plugin_instance = plugin_obj.plugin_class()
+            key, name, _ = module_info.get("module")
+            if isinstance(plugin_instance, WidgetPlugin):
+                plugin_instance.open(key, name, self)
+            elif isinstance(plugin_instance, WindowPlugin):
+                plugin_instance.open(key, name, self.app)
+
+
+    # def open_window_plugin(self, backend_path):
+    #     from PySide6.QtCore import QProcess
+    #     module, function = backend_path.split(":", 1)
+    #     code = f"""
+    #         import importlib
+
+    #         module = importlib.import_module("{module}")
+    #         func = getattr(module, "{function}")
+    #         func()
+    #         """
+    #     process = QProcess(self)
+    #     process.start(
+    #         sys.executable,
+    #         ["-c", code]
+    #     )
+
+    #     print("PID:", process.processId())
+    #     self.window_plugins = self.app.plugin_manager.window_plugins
+    #     self.window_plugins.update({backend_path: process.processId()})
     
+#     def open_window_plugin(self, backend_path):
+#         from PySide6.QtCore import QProcess
+
+#         module, function = backend_path.split(":", 1)
+
+#         code = f"""
+# import importlib
+# import traceback
+
+# try:
+#     print("Starting plugin...", flush=True)
+
+#     module = importlib.import_module("{module}")
+#     print("Imported module:", module, flush=True)
+
+#     func = getattr(module, "{function}")
+#     print("Found function:", func, flush=True)
+
+#     func()
+
+#     print("Function returned", flush=True)
+
+# except Exception:
+#     traceback.print_exc()
+# """
+
+#         process = QProcess(self)
+
+#         process.setProcessChannelMode(
+#             QProcess.ProcessChannelMode.MergedChannels
+#         )
+
+#         process.readyReadStandardOutput.connect(
+#             lambda p=process: print(
+#                 bytes(p.readAllStandardOutput()).decode(errors="replace"),
+#                 end=""
+#             )
+#         )
+
+#         process.finished.connect(
+#             lambda exit_code, exit_status:
+#                 print(
+#                     f"[PLUGIN] Process finished: "
+#                     f"code={exit_code}, status={exit_status}"
+#                 )
+#         )
+
+#         process.errorOccurred.connect(
+#             lambda error:
+#                 print(f"[PLUGIN] QProcess error: {error}")
+#         )
+
+#         process.start(
+#             sys.executable,
+#             ["-c", code]
+#         )
+
+#         print("PID:", process.processId())
+
+#         self.window_plugins = self.app.plugin_manager.window_plugins
+#         self.window_plugins[backend_path] = process.processId()
+
+#         # VERY IMPORTANT
+#         self._plugin_processes = getattr(
+#             self,
+#             "_plugin_processes",
+#             {}
+#         )
+
+#         self._plugin_processes[backend_path] = process
+
+    # def common_open_plugin(self, backend_path, title, id, type):
+    #     if type=="widget":
+    #         module_path, class_name = backend_path.rsplit(".", 1)
+    #         module = importlib.import_module(module_path)
+    #         backend_class = getattr(module, class_name)
+
+    #         id = self.update_module_count(backend_class)
+
+    #         self.clear_layout(self.main_widget_layout)
+    #         from osdagbridge.desktop.ui.template_page import CustomWindow
+    #         template_page = CustomWindow(class_name, backend_class, parent=self)
+    #         # Connect Import XLSX
+    #         # template_page.importSection.connect(self.import_section)
+
+    #         template_page.setWindowFlags(Qt.Widget)
+    #         template_page.setAttribute(Qt.WA_DontCreateNativeAncestors, True)
+    #         template_page.setAttribute(Qt.WA_NativeWindow, False)
+            
+    #         # Prevent all children from creating native windows
+    #         # IMPORTANT: This enables event detection after opening template_page
+    #         for child in template_page.findChildren(QWidget):
+    #             child.setAttribute(Qt.WA_DontCreateNativeAncestors, True)
+
+    #         # # Load the last Design Inputs-start------------------------------------
+    #         # last_design_folder = os.path.join('ResourceFiles', 'last_designs')
+    #         # last_design_file = str(template_page.backend.module_name()).replace(' ', '') + ".osi"
+    #         # last_design_file = os.path.join(last_design_folder, last_design_file)
+    #         # last_design_dictionary = {}
+
+    #         # # Create folder if it doesn't exist
+    #         # if not os.path.isdir(last_design_folder):
+    #         #     os.makedirs(last_design_folder)
+
+    #         # # Load previous design if file exists
+    #         # if os.path.isfile(last_design_file):
+    #         #     with open(str(last_design_file), 'r') as last_design:
+    #         #         last_design_dictionary = yaml.safe_load(last_design)
+    #         #         template_page.setDictToUserInputs(last_design_dictionary)
+    #         # Load the last Design Inputs-end------------------------------------
+
+    #         self.main_widget_instance = template_page
+    #         # template_page.openNewTab.connect(self.handle_add_tab)
+    #         # template_page.downloadDatabase.connect(self.download_Database)
+    #         self.main_widget_layout.addWidget(template_page)
+            
+    #         index = self.tab_bar.currentIndex()
+    #         self.tab_bar.setTabText(index, class_name)
+    #     if type == "window":
+    #         from PySide6.QtCore import QProcess
+    #         module_name, method_name = backend_path.split(":", 1)
+
+    #         module, method = backend_path.split(":", 1)
+    #         method()
+    #         code = f"""
+    #             import importlib
+
+    #             module = importlib.import_module("{module}")
+    #             func = getattr(module, "{function}")
+    #             func()
+    #             """
+    #         process = QProcess(self)
+    #         process.start(
+    #             sys.executable,
+    #             ["-c", code]
+    #         )
+
+    #         print("PID:", process.processId())
+    #         self.window_plugins = self.app.plugin_manager.window_plugin
+    #         self.window_plugins.update(backend_path, process.processId())
+            
     # 1-Fin-plate-shear-connection
     def open_fin_plate_shear_conn(self):
         # Local import to avoid empty material list in UI
@@ -1638,14 +1896,14 @@ class MainWindow(QMainWindow):
         backend = Tension_bolted
         id = self.update_module_count(backend)
         self.common_open_module(backend, "Tension Member: Bolted to End Gusset", id)
- 
+
     # 17-Welded-to-End-Gusset-Tension-Member
     def open_tension_welded(self):
         from osdag_core.design_type.tension_member.tension_welded import Tension_welded
         backend = Tension_welded
         id = self.update_module_count(backend)
         self.common_open_module(backend, "Tension Member: Welded to End Gusset", id)     
- 
+
     # 18-Column-design-Compression-Member
     def open_column_design_compress_member(self):
         from osdag_core.design_type.compression_member.compression_column import ColumnDesign
@@ -1687,19 +1945,14 @@ class MainWindow(QMainWindow):
         id = self.update_module_count(backend)
         self.common_open_module(backend, "Plate Girder", id)  
 
-    # 23-Flexure-purlin
-    def open_purlin_flexure(self):
-        from osdag_core.design_type.flexural_member.flexure_purlin import Flexure_Purlin
-        backend = Flexure_Purlin
-        id = self.update_module_count(backend)
-        self.common_open_module(backend, "Purlin", id)
 
-    # 24-Base-Plate-connection
+    # 23-Base-Plate-connection
     def open_base_plate_conn(self):
         from osdag_core.design_type.connection.base_plate_connection import BasePlateConnection
         backend = BasePlateConnection
         id = self.update_module_count(backend)
         self.common_open_module(backend, "Base Plate Connection", id)
+
 
     def open_home_page(self, module):
         self.clear_layout(self.main_widget_layout)
