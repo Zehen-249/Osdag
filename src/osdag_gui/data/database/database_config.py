@@ -163,7 +163,7 @@ def _search_projects(keywords: list, module_keys: list[tuple]) -> list[dict]:
                 ID: row[0],
                 PROJECT_NAME: row[1],
                 PROJECT_PATH: row[2],
-                RELATED_SUBMODULE: MODULE_MAP.get(row[3])[0],
+                RELATED_SUBMODULE: MODULE_MAP.get(row[3])[0] if MODULE_MAP.get(row[3]) else None,
                 MODULE_KEY: row[3],
                 CREATION_DATE: _format_datetime(row[4]),
                 LAST_EDITED: _format_datetime(row[5]),
@@ -180,13 +180,14 @@ def _search_projects(keywords: list, module_keys: list[tuple]) -> list[dict]:
 def _get_module_data(keys: list[tuple]) -> list[dict]:
     records = []
     for key, _ in keys:
-        dat = MODULE_MAP[key]
-        r = {
-            MODULE_KEY: key,
-            RELATED_MODULE: dat[1],
-            RELATED_SUBMODULE: dat[0],
-        }
-        records.append(r)
+        dat = MODULE_MAP.get(key)
+        if dat:
+            r = {
+                MODULE_KEY: key,
+                RELATED_MODULE: dat[1],
+                RELATED_SUBMODULE: dat[0],
+            }
+            records.append(r)
     
     return records
 
@@ -260,10 +261,8 @@ MODULE_MAP = {
 
 # To retrieve the name of a module function that can open the required module
 def get_module_function(key: str):
-    if MODULE_MAP.get(key,None):
-        return MODULE_MAP[key][2]
-    else: 
-        return "open_widget_plugin"
+    return MODULE_MAP.get(key)[2] if MODULE_MAP.get(key) else None
+
 
 import sqlite3
 from datetime import datetime, timedelta
@@ -340,7 +339,7 @@ def fetch_all_recent_projects() -> List[Dict]:
             ID: row[0],
             PROJECT_NAME: row[1],
             PROJECT_PATH: row[2],
-            RELATED_SUBMODULE: MODULE_MAP.get(row[3])[0],
+            RELATED_SUBMODULE: MODULE_MAP.get(row[3])[0] if MODULE_MAP.get(row[3]) else None,
             MODULE_KEY: row[3],
             CREATION_DATE: _format_datetime(row[4]),
             LAST_EDITED: _format_datetime(row[5]),
@@ -364,15 +363,16 @@ def fetch_all_recent_modules() -> list[dict]:
         """)
         rows = cursor.fetchall()
         for row in rows:
-            dat = MODULE_MAP[row[1]]
-            r = {
-                ID: row[0],
-                MODULE_KEY: row[1],
-                RELATED_MODULE: dat[1],
-                RELATED_SUBMODULE: dat[0],
-                LAST_OPENED: _format_datetime(row[2])
-            }
-            records.append(r)
+            dat = MODULE_MAP.get(row[1])
+            if dat:
+                r = {
+                    ID: row[0],
+                    MODULE_KEY: row[1],
+                    RELATED_MODULE: dat[1] if dat else None,
+                    RELATED_SUBMODULE: dat[0] if dat else None,
+                    LAST_OPENED: _format_datetime(row[2])
+                }
+                records.append(r)
     except sqlite3.Error as e:
         print(f"[ERROR] Database error: {e}")
     finally:

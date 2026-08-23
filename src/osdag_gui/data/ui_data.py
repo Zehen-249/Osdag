@@ -86,9 +86,13 @@ class Data:
         [],
         "3D Frame": 
         [],
+        # "Osdagbridge":
+        # [
+        #     ("osdagbridge.desktop.__main__:main", "Plate Girder", ":/vectors/fin_plate_shear_conn.svg"),
+        # ]
 
     }
-    
+    # Run time active plugins will be added to this dictionary.
     PLUGINS = {
         
     }
@@ -103,6 +107,7 @@ class Data:
         "2D Frame": [":/vectors/nav_icons/2d_frame.svg", ":/vectors/nav_icons/2d_frame_dark.svg"],
         "3D Frame": [":/vectors/nav_icons/3d_frame.svg", ":/vectors/nav_icons/3d_frame_dark.svg"],
         # "Group Design": [":/vectors/nav_icons/group_design.svg", ":/vectors/nav_icons/group_design_dark.svg"],
+        # "Osdagbridge": [":/vectors/nav_icons/3d_frame.svg", ":/vectors/nav_icons/3d_frame_dark.svg"],
     }
 
     FLOATING_NAVBAR = [

@@ -50,12 +50,12 @@ class StatusIndicator(QWidget):
         if status:
             self.circle.setStyleSheet(
                 "border-radius: 6px; background-color: green;")
-            self.text.setText("Active")
+            self.text.setText("Activated")
             self.text.setStyleSheet("color: green;")
         else:
             self.circle.setStyleSheet(
                 "border-radius: 6px; background-color: red;")
-            self.text.setText("Inactive")
+            self.text.setText("Deactivated")
             self.text.setStyleSheet("color: red;")
 
 
@@ -86,7 +86,7 @@ class PluginWidget(QWidget):
         header_layout.setSpacing(5)
 
         self.name_label = QLabel(
-            f"{'<b>'+plugin.name+'</b> (Dev Plugin)' if plugin.is_dev else '<b>'+plugin.name+'</b>'}")
+            f"{'<b>'+plugin.name.title()+'</b> (Dev Plugin)' if plugin.is_dev else '<b>'+plugin.name.title()+'</b>'}")
         self.name_label.setStyleSheet(
             "font-weight: bold; font-size: 12pt; color: #90AF13;")
         self.status_indicator = StatusIndicator(plugin)
@@ -106,7 +106,7 @@ class PluginWidget(QWidget):
         # LEFT SIDE (description)
         self.content = QTextEdit()
         self.content.setReadOnly(True)
-        content_text = f"{'<b>Author</b>' if len(self.plugin.authors) == 1 else '<b>Authors</b>'}: ({', '.join(author for author in self.plugin.authors)})"
+        content_text = f"{'<b>Author</b>' if len(self.plugin.authors) == 1 else '<b>Authors</b>'}: ({', '.join(author.title() for author in self.plugin.authors)})"
         content_text += f"<br><b>Description</b>: {self.plugin.description}"
         self.content.setText(content_text)
         self.content.setMinimumHeight(100)
@@ -306,15 +306,15 @@ class PluginManagerDialog(QDialog):
 
     def activate_plugin(self, plugin: PluginMetaData):
         plugin = self.plugin_manager.get_plugin(plugin.id)
-        if plugin and plugin.name.title() not in self.active_plugins.keys():
-            self.active_plugins[plugin.name.title()] = plugin.module_tree
-            self.data_modules.update({plugin.name.title(): plugin.module_tree})
-            self.data_navbar_icons.update({plugin.name.title(): plugin.icons})
+        if plugin and plugin.name not in self.active_plugins.keys():
+            self.active_plugins[plugin.name] = plugin.module_tree
+            self.data_modules.update({plugin.name: plugin.module_tree})
+            self.data_navbar_icons.update({plugin.name: plugin.icons})
 
     def deactivate_plugin(self, plugin: PluginMetaData):
-        self.active_plugins.pop(plugin.name.title(), None)
-        self.data_modules.pop(plugin.name.title(), None)
-        self.data_navbar_icons.pop(plugin.name.title(), None)
+        self.active_plugins.pop(plugin.name, None)
+        self.data_modules.pop(plugin.name, None)
+        self.data_navbar_icons.pop(plugin.name, None)
 
     def delete_plugin(self, plugin: PluginMetaData):
         self.deactivate_plugin(plugin)

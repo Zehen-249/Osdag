@@ -13,22 +13,66 @@ import pkgutil
 import importlib
 import uuid
 from types import ModuleType
+from collections import defaultdict
+from typing import Type
+
+from osdag_gui.plugin.plugin_base import PluginBase
+from osdag_gui.plugin.window_plugin import WindowPlugin
+from osdag_gui.plugin.widget_plugin import WidgetPlugin
 
 
 @dataclass
 class PluginMetaData:
-    id: str
+    id: str = field(init=False)
     name: str
+    plugin_type: Type[WindowPlugin] | Type[WidgetPlugin] = field(init=False)
     description: str = field(
         default_factory=lambda: "No description available.")
     authors: list[str] = field(default_factory=lambda: ["Unknown"])
     version: str = field(default_factory=lambda: "1.0.0")
     status: bool = field(default_factory=lambda: False)
-    module: object = field(default_factory=lambda: None)
-    entry_class: object = field(default_factory=lambda: None)
-    module_tree: list[tuple] | dict[str,list[tuple]] = field(default_factory=lambda: [("No Module","",None)])
+    plugin_class: Type[WindowPlugin] | Type[WidgetPlugin] = field(default_factory=lambda: None)
+    # module: object = field(default_factory=lambda: None)
+    # entry_class: object = field(default_factory=lambda: None)
+    module_tree: list[tuple] | dict[str,list[tuple]] = field(default_factory=lambda: [("", "", None)])
     icons: list[str] = field(default_factory=lambda: [":/images/add_ons.png", ":/images/add_ons_clicked.png"])
     is_dev: bool = field(default_factory=lambda: False)
+    
+
+    def __post_init__(self):
+        self.id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_DNS,
+                f"{self.name}:{self.version}"
+            )
+        )
+        if self.plugin_class is not None:
+            plugin_package, class_name = self.plugin_class.split(":", 1)
+            plugin_module = importlib.import_module(plugin_package)
+            resolved_class = getattr(plugin_module, class_name)
+            if resolved_class is None:
+                raise AttributeError(
+                    f"Plugin '{self.name}': class '{class_name}' "
+                    f"was not found in module '{plugin_module}'."
+                )
+            if not issubclass(resolved_class, PluginBase):
+                raise TypeError(
+                    f"Plugin '{self.name}': '{plugin_module}:{class_name}' "
+                    f"resolved to {resolved_class!r}, "
+                    f"which is not a subclass of PluginBase."
+                )
+            self.plugin_class = resolved_class
+            if issubclass(self.plugin_class, WindowPlugin):
+                self.plugin_type = WindowPlugin
+            elif issubclass(self.plugin_class, WidgetPlugin):
+                self.plugin_type = WidgetPlugin
+            else:
+                raise TypeError(
+                    f"Plugin '{self.name}': '{self.plugin_class}' "
+                    f"is not a subclass of WindowPlugin or WidgetPlugin."
+                )
+        else:
+            self.plugin_type = None
 
 
 class PluginManager:
@@ -36,7 +80,8 @@ class PluginManager:
         self.state_manager = StateManager()
         self.plugins: list[PluginMetaData] = []
         self.dev_plugins_paths: list[Path] = self.state_manager.get_plugin_paths()
-        self.plugins_entry_point = None
+        self.plugins_entry_point = metadata.entry_points().select(group="osdag.plugins")
+        self.window_plugins = defaultdict()
         print(f"[INFO] PluginManager initialized.")
 
     # ---------------------------
@@ -55,123 +100,241 @@ class PluginManager:
 
     def _load_entry_point_plugins(self) -> None:
         try:
-            self.plugins_entry_point = metadata.entry_points().select(group="osdag.plugins")
             for ep in self.plugins_entry_point:
                 module = ep.load()
                 if not getattr(module, "IS_OSDAG_PLUGIN", False):
                     print(
-                        f"[WARN] Entry point '{ep.name}' is not a valid OSDAG plugin.")
+                        f"[WARN] Installed Plugin '{ep.name}' is not a valid OSDAG plugin.")
                     continue
                 meta = getattr(module, "META", {})
-                name = meta.get("name")
-                if name is None:
-                    print(f"[WARN] Entry point '{ep.name}' is missing 'name'.")
-                    continue
-                if "osdag_plugin_" in name:
-                    name = name[len("osdag_plugin_"):]
-                    meta["name"] = name
-
-                entry_point = getattr(module, "ENTRY_POINT", None)
-                entry_class = self._resolve_entry_class(
-                    module, name, entry_point)
-                if entry_class:
-                    self.plugins.append(PluginMetaData(
-                        **meta, status=False, module=module, entry_class=entry_class))
-                else:
+                if not isinstance(meta, dict):
                     print(
-                        f"[WARN] Entry point '{ep.name}' could not resolve entry class.")
+                        f"[WARN] Installed plugin '{ep.name}' has invalid META."
+                    )
                     continue
+                if not meta.get("name"):
+                    print(f"[WARN] Installed plugin '{ep.name}' is missing 'name' in META.")
+                    continue
+                if not meta.get("plugin_class"):
+                    print(
+                        f"[WARN] Installed plugin '{ep.name}' is missing "
+                        f"'plugin_class' in META."
+                    )
+                    continue
+
+                if not meta.get("module_tree"):
+                    print(
+                        f"[WARN] Installed plugin '{ep.name}' is missing "
+                        f"'module_tree' in META."
+                    )
+                    continue
+
+                # Create metadata
+                self.plugins.append(PluginMetaData(**meta))
+                
+                
+                # if "osdag_plugin_" in name:
+                #     name = name[len("osdag_plugin_"):]
+                #     meta["name"] = name
+                # entry_point = getattr(module, "ENTRY_POINT", None)
+                # entry_class = self._resolve_entry_class(
+                #     module, name, entry_point)
+                # if entry_class:
+                #     self.plugins.append(PluginMetaData(
+                #         **meta, status=False, module=module, entry_class=entry_class))
+                # else:
+                #     print(
+                #         f"[WARN] Entry point '{ep.name}' could not resolve entry class.")
+                #     continue
         except Exception as e:
-            print(f"[WARN] Entry point loading failed: {e}")
+            print(f"[WARN] Installed plugin loading failed: {e}")
+
+    # def _load_dev_plugins(self) -> None:
+    #     if not self.dev_plugins_paths:
+    #         print("[INFO] No development plugins paths configured.")
+    #         return
+    #     for plugin_root in self.dev_plugins_paths:
+    #         if not plugin_root.exists():
+    #             print(
+    #                 f"[WARN] Development plugins path '{plugin_root}' does not exist.")
+    #             continue
+    #         if not plugin_root.is_dir():
+    #             print(
+    #                 f"[WARN] Development plugins path '{plugin_root}' is not a directory.")
+    #             continue
+
+    #         # Add workspace root to sys.path so plugins can be imported
+    #         workspace_root = plugin_root.parent
+    #         if str(workspace_root) not in sys.path:
+    #             sys.path.insert(0, str(workspace_root))
+
+    #         for pkg_dir in plugin_root.iterdir():
+    #             if not pkg_dir.is_dir():
+    #                 continue
+    #             for _, name, ispkg in pkgutil.iter_modules([str(pkg_dir)]):
+    #                 if not ispkg:
+    #                     continue
+    #                 if name in [p.name for p in self.plugins]:
+    #                     print(
+    #                         f"[INFO] Development plugin '{name}' is already loaded from osdag.plugins entry point.")
+    #                     continue
+    #                 try:
+    #                     module = importlib.import_module(
+    #                         f"{pkg_dir.name}.{name}")
+    #                     if not getattr(module, "IS_OSDAG_PLUGIN", False):
+    #                         print(
+    #                             f"[WARN] Development plugin '{name}' is not a valid OSDAG plugin.")
+    #                         continue
+    #                     meta = getattr(module, "META", {})
+    #                     plugin_name = meta.get("name")
+    #                     if plugin_name is None:
+    #                         print(f"[WARN] Development plugin '{name}' is missing 'name'.")
+    #                         continue
+    #                     self.plugins.append(PluginMetaData(
+    #                         **meta, status=False, plugin_class=entry_class))
+    #                     # entry_class = self._resolve_entry_class(
+    #                     #     module, plugin_name, getattr(module, "ENTRY_POINT", None))
+    #                     # if entry_class:
+    #                     #     self.plugins.append(PluginMetaData(
+    #                     #         **meta, status=False, plugin_class=entry_class))
+    #                     # else:
+    #                     #     print(
+    #                     #         f"[WARN] Development plugin '{name}' could not resolve entry class.")
+    #                 except Exception as e:
+    #                     print(f"[WARN] Could not load Development plugin '{name}': {e}")
+
+    # # def _resolve_entry_class(self, module: ModuleType, name: str, entry_path: str) -> object | None:
+    #     if not entry_path:
+    #         print(f"[WARN] Plugin '{name}' missing 'ENTRY_POINT'.")
+    #         return None
+    #     try:
+    #         parts = entry_path.split(".")
+    #         submodule_name = ".".join(parts[:-1])
+    #         class_name = parts[-1]
+    #         entry_module = importlib.import_module(
+    #             f"{module.__name__}" + (f".{submodule_name}" if submodule_name else ""))
+    #         return getattr(entry_module, class_name)
+    #     except Exception as e:
+    #         print(
+    #             f"[WARN] Could not resolve entry class '{entry_path}' for plugin '{name}': {e}")
+    #         return None
 
     def _load_dev_plugins(self) -> None:
-        for plugin_root in self.dev_plugins_paths:
-            if not plugin_root.exists():
+        for plugin_path in self.dev_plugins_paths:
+            plugin_path = Path(plugin_path).resolve()
+            print(f"[INFO] Loading development plugin from path: {plugin_path}")
+
+            # Check folder
+            if not plugin_path.exists():
                 print(
-                    f"[ERROR] Development plugins path '{plugin_root}' does not exist.")
-                return
+                    f"[WARN] Development plugin path "
+                    f"'{plugin_path}' does not exist."
+                )
+                continue
 
-            # Add workspace root to sys.path so plugins can be imported
-            workspace_root = plugin_root.parent
-            if str(workspace_root) not in sys.path:
-                sys.path.insert(0, str(workspace_root))
+            if not plugin_path.is_dir():
+                print(
+                    f"[WARN] Development plugin path "
+                    f"'{plugin_path}' is not a directory."
+                )
+                continue
 
-            for pkg_dir in plugin_root.iterdir():
-                if not pkg_dir.is_dir():
+            # Check package
+            init_file = plugin_path / "__init__.py"
+
+            if not init_file.exists():
+                print(
+                    f"[WARN] '{plugin_path}' does not contain "
+                    f"__init__.py."
+                )
+                continue
+
+            # Package name and import root
+            package_name = plugin_path.name
+            import_root = plugin_path.parent
+
+            if str(import_root) not in sys.path:
+                sys.path.insert(0, str(import_root))
+
+            try:
+
+                # Import package
+                module = importlib.import_module(package_name)
+
+                # Validate Osdag plugin
+                if not getattr(module, "IS_OSDAG_PLUGIN", False):
+                    print(
+                        f"[WARN] '{package_name}' is not "
+                        f"a valid Osdag plugin."
+                    )
                     continue
-                for _, name, ispkg in pkgutil.iter_modules([str(pkg_dir)]):
-                    if not ispkg:
-                        continue
-                    if name in [p.name for p in self.plugins]:
-                        print(
-                            f"[WARN] Development plugin '{name}' is already loaded from osdag.plugins entry point.")
-                        continue
-                    try:
-                        module = importlib.import_module(
-                            f"plugins.{pkg_dir.name}.{name}")
-                        if not getattr(module, "IS_OSDAG_PLUGIN", False):
-                            print(
-                                f"[WARN] Development plugin '{name}' is not a valid OSDAG plugin.")
-                            continue
-                        meta = getattr(module, "META", {})
-                        plugin_name = meta.get("name")
-                        if plugin_name is None:
-                            print(f"[WARN] Development plugin '{name}' is missing 'name'.")
-                            continue
-                        entry_class = self._resolve_entry_class(
-                            module, plugin_name, getattr(module, "ENTRY_POINT", None))
-                        if entry_class:
-                            self.plugins.append(PluginMetaData(
-                                **meta, status=False, module=module, entry_class=entry_class,))
-                        else:
-                            print(
-                                f"[WARN] Development plugin '{name}' could not resolve entry class.")
-                    except Exception as e:
-                        print(f"[WARN] Could not load Development plugins: {e}")
 
-    def _resolve_entry_class(self, module: ModuleType, name: str, entry_path: str) -> object | None:
-        if not entry_path:
-            print(f"[WARN] Plugin '{name}' missing 'ENTRY_POINT'.")
-            return None
-        try:
-            parts = entry_path.split(".")
-            submodule_name = ".".join(parts[:-1])
-            class_name = parts[-1]
-            entry_module = importlib.import_module(
-                f"{module.__name__}" + (f".{submodule_name}" if submodule_name else ""))
-            return getattr(entry_module, class_name)
-        except Exception as e:
-            print(
-                f"[WARN] Could not resolve entry class '{entry_path}' for plugin '{name}': {e}")
-            return None
+                meta = getattr(module, "META", None)
 
+                if not isinstance(meta, dict):
+                    print(
+                        f"[WARN] '{package_name}' has invalid META."
+                    )
+                    continue
+                if not meta.get("name"):
+                    print(
+                        f"[WARN] '{package_name}' is missing "
+                        f"'name' in META."
+                    )
+                    continue
+
+                if not meta.get("plugin_class"):
+                    print(
+                        f"[WARN] '{package_name}' is missing "
+                        f"'plugin_class' in META."
+                    )
+                    continue
+
+                if not meta.get("module_tree"):
+                    print(
+                        f"[WARN] '{package_name}' is missing "
+                        f"'module_tree' in META."
+                    )
+                    continue
+
+                # Create metadata
+                self.plugins.append(PluginMetaData(**meta))
+
+            except Exception as e:
+                print(
+                    f"[WARN] Could not load development plugin "
+                    f"'{package_name}': {e}"
+                )
+        
     def discover_online_plugins(self, channel: str) -> list[PluginMetaData]:
         """Discover available plugins from conda channel (metadata only).
         After downloading, plugins will be loaded via entry points."""
-        url = f"https://conda.anaconda.org/{channel}/label/main/noarch/repodata.json"
-        pkgs = self._fetch_channel_pkgs(url=url)
+        urls = [f"https://conda.anaconda.org/{channel}/label/main/noarch/repodata.json"]
+        pkgs = self._fetch_channel_pkgs(urls=urls)
         online_plugins = []
         for pkg_filename, info in pkgs.items():
             meta = {
-                "id": str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{info.get('name', '')}:{info.get('version', '')}")),
                 "name": info.get("name", ""),
                 "description": info.get("summary", "No description available."),
                 "authors": [info.get("author", "Unknown")],
                 "version": info.get("version", "1.0.0"),
+                "plugin_class": None,  # Will be loaded after download
+                "module_tree": None,  # Will be loaded after download
             }
             # Online plugins are returned as available for download only
             # After download, they will be loaded via _load_entry_point_plugins()
             online_plugins.append(PluginMetaData(**meta))
         return online_plugins
 
-    def _fetch_channel_pkgs(self, url: str):
+    def _fetch_channel_pkgs(self, urls: list[str]):
         """Fetch and parse repodata.json from a conda channel and return packages."""
-        resp = requests.get(url, timeout=20)
-        resp.raise_for_status()
-        repo_data = resp.json()
         pkgs = {}
-        pkgs.update(repo_data.get("packages", {}))
-        pkgs.update(repo_data.get("packages.conda", {}))
+        for url in urls:
+            resp = requests.get(url, timeout=20)
+            resp.raise_for_status()
+            repo_data = resp.json()
+            pkgs.update(repo_data.get("packages", {}))
+            pkgs.update(repo_data.get("packages.conda", {}))
         return pkgs
 
     # ---------------------------
@@ -262,7 +425,7 @@ class PluginManager:
 
     def get_plugin_by_name(self, plugin_name: str) -> PluginMetaData | None:
         for p in self.plugins:
-            if p.name == plugin_name:
+            if p.name.strip().lower() == plugin_name.strip().lower():
                 return p
         return None
 

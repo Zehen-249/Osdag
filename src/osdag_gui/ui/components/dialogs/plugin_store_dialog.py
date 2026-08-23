@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QScrollArea
 )
-from PySide6.QtCore import Qt, Signal, Slot, QObject, QThread, QTimer, QMetaObject
+from PySide6.QtCore import Qt, Signal, Slot, QObject, QThread, QTimer, QMetaObject, QSize
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtGui import QIcon
 from osdag_gui.ui.components.dialogs.custom_titlebar import CustomTitleBar
@@ -46,75 +46,123 @@ class PluginWidget(QWidget):
     def __init__(self, plugin: PluginMetaData, parent=None):
         super().__init__(parent)
         self.plugin = plugin
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(12)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
+
+        self.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Fixed
+        )
 
         self.setStyleSheet("""
             PluginWidget {
-                border: 1px solid #d0d0d0;
-                border-radius: 6px;
                 background-color: #ffffff;
+                border: 1px solid #d8d8d8;
+                border-radius: 6px;
             }
         """)
 
-        # --- HEADER ROW ---
+        # ============================================================
+        # HEADER
+        # ============================================================
+
         header = QWidget()
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(2, 2, 2, 2)
-        header_layout.setSpacing(5)
+        header_layout.setContentsMargins(2, 0, 2, 0)
+        header_layout.setSpacing(7)
 
-        self.name_label = QLabel(f"{'<b>'+plugin.name+'</b>'}")
-        self.name_label.setStyleSheet(
-            "font-weight: bold; font-size: 12pt; color: #90AF13;")
-        # self.status_indicator = StatusIndicator(plugin)
+        self.name_label = QLabel(plugin.name.title())
+        self.name_label.setStyleSheet("""
+            QLabel {
+                font-size: 12pt;
+                font-weight: bold;
+                color: #90AF13;
+            }
+        """)
 
-        header_layout.addWidget(self.name_label, alignment=Qt.AlignLeft)
-        # header_layout.addStretch()
-        # header_layout.addWidget(self.status_indicator, alignment=Qt.AlignRight)
+        self.status_label = QLabel()
+        self.status_label.setStyleSheet("""
+            QLabel {
+                font-size: 10pt;
+                font-weight: normal;
+                color: #90AF13;
+            }
+        """)
+
+        header_layout.addWidget(self.name_label)
+        header_layout.addWidget(self.status_label)
+        header_layout.addStretch()
 
         layout.addWidget(header)
 
-        # --- CONTENT ROW ---
-        content = QWidget()
-        content_layout = QHBoxLayout(content)
-        content_layout.setContentsMargins(10, 10, 10, 10)
-        content_layout.setSpacing(15)
 
-        # LEFT SIDE (description)
-        self.content = QTextEdit()
-        self.content.setReadOnly(True)
-        content_text = f"{'<b>Author</b>' if len(self.plugin.authors) == 1 else '<b>Authors</b>'}: ({', '.join(author for author in self.plugin.authors)})"
-        content_text += f"<br><b>Description</b>: {self.plugin.description}"
+        # ============================================================
+        # CONTENT
+        # ============================================================
+
+        content = QWidget()
+
+        content_layout = QHBoxLayout(content)
+        content_layout.setContentsMargins(2, 2, 2, 2)
+        content_layout.setSpacing(20)
+
+
+        # -------------------------
+        # Information
+        # -------------------------
+
+        self.content = QLabel()
+
+        content_text = (
+            f"<b>{'Author' if len(self.plugin.authors) == 1 else 'Authors'}:</b> "
+            f"{', '.join(self.plugin.authors)}"
+        )
+
+        content_text += (
+            f"<br><b>Description:</b> "
+            f"{self.plugin.description}"
+        )
+
         self.content.setText(content_text)
-        self.content.setMinimumHeight(100)
-        self.content.setMaximumHeight(200)
+        self.content.setWordWrap(True)
+        self.content.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+
         self.content.setSizePolicy(
-            QSizePolicy.Expanding, QSizePolicy.Expanding)
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding
+        )
+
         self.content.setStyleSheet("""
-            QTextEdit {
-                border: 1px solid #e0e0e0;
-                border-radius: 4px;
+            QLabel {
                 font-size: 9.5pt;
-                color: #444;
-                background: #fafafa;
+                color: #444444;
+                background: transparent;
+                border: none;
             }
         """)
-        content_layout.addWidget(self.content, stretch=3)
 
-       # RIGHT SIDE (buttons)
-        btn_layout = QVBoxLayout()
-        btn_layout.setContentsMargins(4, 4, 4, 4)
-        btn_layout.setSpacing(10)
+        content_layout.addWidget(self.content, stretch=1)
 
+
+        # -------------------------
+        # Buttons
+        # -------------------------
         self.btnDownload = QPushButton("Download")
         self.btnDelete = QPushButton("Delete")
         self.btnUpdate = QPushButton("Update")
 
-        for btn in (self.btnDownload, self.btnDelete, self.btnUpdate):
-            btn.setMinimumHeight(30)
-            btn.setMinimumWidth(100)
-            btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        btn_layout = QVBoxLayout()
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.setSpacing(6)
+
+        for btn in (
+            self.btnDownload,
+            self.btnDelete,
+            self.btnUpdate
+        ):
+            btn.setFixedSize(100, 30)
             btn.setStyleSheet("""
                 QPushButton {
                     background-color: #90AF13;
@@ -123,14 +171,27 @@ class PluginWidget(QWidget):
                     border-radius: 5px;
                     font-size: 9pt;
                     font-weight: bold;
-                    margin: 4px;
                 }
-                QPushButton:hover { background-color: #7A9611; }
-                QPushButton:pressed { background-color: #6B850F; }
-            """)
-            btn_layout.addWidget(btn, 0, Qt.AlignRight)
 
-        content_layout.addLayout(btn_layout, stretch=1)
+                QPushButton:hover {
+                    background-color: #7A9611;
+                }
+
+                QPushButton:pressed {
+                    background-color: #6B850F;
+                }
+
+                QPushButton:disabled {
+                    background-color: #B8C58A;
+                    color: #F5F5F5;
+                }
+            """)
+
+            btn_layout.addWidget(btn)
+
+        btn_layout.addStretch()
+
+        content_layout.addLayout(btn_layout)
 
         layout.addWidget(content)
 
@@ -142,6 +203,7 @@ class PluginWidget(QWidget):
         content_min_width = self.content.sizeHint().width() + 150
         self.setMinimumWidth(content_min_width)
 
+
     def _emit_download(self):
         self.download.emit(self.plugin)
 
@@ -151,6 +213,62 @@ class PluginWidget(QWidget):
     def _emit_update(self):
         self.update.emit(self.plugin)
 
+    def set_status(self, status=""):
+        self.status_label.setText(f"({status})" if status else "")
+
+    def set_state(self, state):
+        """
+        Set the complete visual state of the plugin widget.
+
+        States:
+            available
+            downloading
+            installed
+            update_available
+            updating
+            deleting
+            error
+        """
+
+        # First establish a clean baseline
+        self.btnDownload.setVisible(False)
+        self.btnUpdate.setVisible(False)
+        self.btnDelete.setVisible(False)
+
+        self.btnDownload.setEnabled(True)
+        self.btnUpdate.setEnabled(True)
+        self.btnDelete.setEnabled(True)
+
+        if state == "available":
+            self.set_status("")
+            self.btnDownload.setVisible(True)
+
+        elif state == "downloading":
+            self.set_status("Downloading...")
+            self.btnDownload.setVisible(True)
+            self.btnDownload.setEnabled(False)
+
+        elif state == "installed":
+            self.set_status("Installed")
+            self.btnDelete.setVisible(True)
+
+        elif state == "update_available":
+            self.set_status("Update available")
+            self.btnUpdate.setVisible(True)
+            self.btnDelete.setVisible(True)
+
+        elif state == "updating":
+            self.set_status("Updating...")
+            self.btnUpdate.setVisible(True)
+            self.btnUpdate.setEnabled(False)
+            self.btnDelete.setVisible(False)
+
+        elif state == "deleting":
+            self.set_status("Deleting...")
+            self.btnDelete.setVisible(True)
+
+        elif state == "error":
+            self.set_status("Operation failed")
 
 class PluginStoreDialog(QDialog):
     def __init__(self, parent=None):
@@ -161,13 +279,13 @@ class PluginStoreDialog(QDialog):
         self.local_plugins: list[PluginMetaData] = self.plugin_manager.discover_local_plugins(
         )
         self.updates_available = self._check_for_updates()
-        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setObjectName("PluginManagerDialog")
         self.setWindowIcon(QIcon(":/images/osdag_logo.png"))
 
         mainLayout = QVBoxLayout(self)
-        mainLayout.setContentsMargins(1, 1, 1, 1)
+        mainLayout.setContentsMargins(0, 0, 0, 0)
         mainLayout.setSpacing(0)
 
         # Title bar
@@ -179,26 +297,69 @@ class PluginStoreDialog(QDialog):
         contentWidget = QWidget(self)
         contentWidget.setObjectName("ContentWidget")
         contentLayout = QVBoxLayout(contentWidget)
-        contentLayout.setContentsMargins(10, 10, 10, 10)
+        contentLayout.setContentsMargins(12, 10, 12, 10)
         contentLayout.setSpacing(10)
 
         # Logo
-        self.logoLabel = QSvgWidget(":/vectors/Osdag_light.svg", self)
-        self.logoLabel.setMaximumHeight(100)
-        self.logoLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        contentLayout.addWidget(self.logoLabel, 0, Qt.AlignLeft)
+        self.logoLabel = QSvgWidget(
+            ":/vectors/Osdag_light.svg",
+            self
+        )
+        logo_height = 85
+        svg_size = self.logoLabel.renderer().defaultSize()
+
+        if not svg_size.isEmpty() and svg_size.height() > 0:
+            logo_width = int(
+                svg_size.width()
+                * logo_height
+                / svg_size.height()
+            )
+            self.logoLabel.setFixedSize(
+                logo_width,
+                logo_height
+            )
+        else:
+            self.logoLabel.setFixedSize(
+                500,
+                logo_height
+            )
+
+        contentLayout.addWidget(
+            self.logoLabel,
+            0,
+            Qt.AlignLeft
+        )
 
         # Scroll area for plugins
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(
-            "QScrollArea { border: 0.5px solid black; background-color: #F0F0F0; }")
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setWidgetResizable(True)
+
+        scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: #F4F4F4;
+            }
+
+            QScrollArea > QWidget > QWidget {
+                background: #F4F4F4;
+            }
+        """)
         contentLayout.addWidget(scroll)
 
         # Container for plugin widgets
         self.pluginContainer = QWidget()
+
         self.pluginLayout = QVBoxLayout(self.pluginContainer)
+        self.pluginLayout.setContentsMargins(10, 10, 10, 10)
+        self.pluginLayout.setSpacing(10)
         self.pluginLayout.setAlignment(Qt.AlignTop)
+
+        self.pluginContainer.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Preferred
+        )
         scroll.setWidget(self.pluginContainer)
 
         # Populate plugins in the scroll area
@@ -221,9 +382,11 @@ class PluginStoreDialog(QDialog):
         contentLayout.addLayout(buttonLayout)
         mainLayout.addWidget(contentWidget)
 
+
     def delete_plugin(self, plugin: PluginMetaData, widget: PluginWidget):
         widget.btnDelete.setEnabled(False)
-        widget.name_label.setText(f"<b>{plugin.name} (Deleting...)</b>")
+        widget.name_label.setText(f"<b>{plugin.name}</b>")
+        widget.set_state("deleting")
         QApplication.processEvents()  # ensures repaint before thread starts
 
         thread = QThread()
@@ -255,12 +418,12 @@ class PluginStoreDialog(QDialog):
             widget.name_label.setText(f"<b>{plugin.name}</b>")
         else:
             print(f"[INFO] Failed to delete plugin: {plugin.name}")
-            widget.name_label.setText(f"<b>{plugin.name} (Downloaded)</b>")
+            widget.set_state("installed")
             widget.btnDelete.setEnabled(True)
 
     def download_plugin(self, plugin: PluginMetaData, widget: PluginWidget):
         widget.btnDownload.setEnabled(False)
-        widget.name_label.setText(f"<b>{plugin.name} (Downloading...)</b>")
+        widget.set_state("downloading")
         QApplication.processEvents()  # ensures repaint before thread starts
 
         thread = QThread()
@@ -289,15 +452,16 @@ class PluginStoreDialog(QDialog):
             widget.btnDownload.setVisible(False)
             widget.btnDelete.setVisible(True)
             widget.btnDelete.setEnabled(True)
-            widget.name_label.setText(f"<b>{plugin.name} (Downloaded)</b>")
+            widget.set_state("installed")
         else:
             print(f"[INFO] Failed to download plugin: {plugin.name}")
-            widget.name_label.setText(f"<b>{plugin.name}</b>")
+            widget.set_state("error")
             widget.btnDownload.setEnabled(True)
 
     def update_plugin(self, plugin: PluginMetaData, widget: PluginWidget):
         widget.btnUpdate.setEnabled(False)
-        widget.name_label.setText(f"<b>{plugin.name} (Updating...)</b>")
+        widget.name_label.setText(f"<b>{plugin.name}</b>")
+        widget.set_state("updating")
         QApplication.processEvents()  # ensures repaint before thread starts
 
         thread = QThread()
@@ -327,11 +491,10 @@ class PluginStoreDialog(QDialog):
             widget.btnDownload.setVisible(False)
             widget.btnDelete.setVisible(True)
             widget.btnDelete.setEnabled(True)
-            widget.name_label.setText(f"<b>{plugin.name} (Downloaded)</b>")
+            widget.set_state("installed")
         else:
             print(f"[INFO] Failed to update plugin: {plugin.name}")
-            widget.name_label.setText(
-                f"<b>{plugin.name} (Update Available)</b>")
+            widget.set_state("error")
             widget.btnUpdate.setEnabled(True)
 
     def start_worker(self, worker):
@@ -380,7 +543,7 @@ class PluginStoreDialog(QDialog):
             pw.update.connect(
                 lambda plugin, w=pw: self.update_plugin(plugin, w))
 
-            pw.setFixedHeight(120)
+            pw.setMinimumHeight(105)
             pw.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
             is_downloaded = any(
@@ -388,29 +551,17 @@ class PluginStoreDialog(QDialog):
 
             if is_downloaded:
                 is_update_available = any(
-                    up.name == plugin.name for up in self.updates_available)
+                    up.name == plugin.name
+                    for up in self.updates_available
+                )
 
                 if is_update_available:
-                    pw.name_label.setText(
-                        f"<b>{plugin.name} (Update Available)</b>")
-                    pw.btnDownload.setVisible(False)
-                    pw.btnUpdate.setVisible(True)
-                    pw.btnUpdate.setEnabled(True)
-                    pw.btnDelete.setVisible(True)
-                    pw.btnDelete.setEnabled(True)
+                    pw.set_state("update_available")
                 else:
-                    pw.name_label.setText(f"<b>{plugin.name} (Downloaded)</b>")
-                    pw.btnDownload.setVisible(False)
-                    pw.btnUpdate.setVisible(False)
-                    pw.btnDelete.setVisible(True)
-                    pw.btnDelete.setEnabled(True)
+                    pw.set_state("installed")
 
             else:
-                pw.name_label.setText(f"<b>{plugin.name}</b>")
-                pw.btnDownload.setVisible(True)
-                pw.btnDownload.setEnabled(True)
-                pw.btnUpdate.setVisible(False)
-                pw.btnDelete.setVisible(False)
+                pw.set_state("available")
 
             self.pluginLayout.addWidget(pw)
 
