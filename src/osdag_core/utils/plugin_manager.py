@@ -31,7 +31,7 @@ class PluginMetaData:
         default_factory=lambda: "No description available.")
     authors: list[str] = field(default_factory=lambda: ["Unknown"])
     version: str = field(default_factory=lambda: "1.0.0")
-    status: bool = field(default_factory=lambda: True)
+    status: bool = field(default_factory=lambda: False)
     plugin_class: Type[WindowPlugin] | Type[WidgetPlugin] = field(default_factory=lambda: None)
     # module: object = field(default_factory=lambda: None)
     # entry_class: object = field(default_factory=lambda: None)

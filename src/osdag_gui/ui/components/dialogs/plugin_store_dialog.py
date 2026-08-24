@@ -546,6 +546,7 @@ class PluginStoreDialog(QDialog):
             print(f"[INFO] Successfully downloaded plugin: {plugin.name}")
             self.plugin_manager.register_installed_plugin(plugin)
             widget.set_state("installed")
+            # widget.name_label.setText(f"<b>{plugin.name}</b>")
         else:
             print(f"[INFO] Failed to download plugin: {plugin.name}")
             widget.set_state("error")
