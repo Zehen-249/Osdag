@@ -6,7 +6,7 @@ import requests
 import platform
 import tempfile
 from dataclasses import dataclass, field
-from threading import Lock
+from threading import Lock, RLock
 from importlib import metadata
 from pathlib import Path
 import pkgutil
@@ -15,6 +15,7 @@ import uuid
 from types import ModuleType
 from collections import defaultdict
 from typing import Type
+from packaging.version import Version
 
 from osdag_gui.plugin.plugin_base import PluginBase
 from osdag_gui.plugin.window_plugin import WindowPlugin
@@ -30,14 +31,17 @@ class PluginMetaData:
         default_factory=lambda: "No description available.")
     authors: list[str] = field(default_factory=lambda: ["Unknown"])
     version: str = field(default_factory=lambda: "1.0.0")
-    status: bool = field(default_factory=lambda: False)
+    status: bool = field(default_factory=lambda: True)
     plugin_class: Type[WindowPlugin] | Type[WidgetPlugin] = field(default_factory=lambda: None)
     # module: object = field(default_factory=lambda: None)
     # entry_class: object = field(default_factory=lambda: None)
     module_tree: list[tuple] | dict[str,list[tuple]] = field(default_factory=lambda: [("", "", None)])
     icons: list[str] = field(default_factory=lambda: [":/images/add_ons.png", ":/images/add_ons_clicked.png"])
     is_dev: bool = field(default_factory=lambda: False)
-    
+    online_avl: bool = field(init=False)
+    download_size: int = field(init=False)
+    online_ver: str = field(init=False)
+    conda_channel: str = field(init=False)
 
     def __post_init__(self):
         self.id = str(
@@ -73,8 +77,7 @@ class PluginMetaData:
                 )
         else:
             self.plugin_type = None
-
-
+        
 class PluginManager:
     def __init__(self):
         self.state_manager = StateManager()
@@ -296,7 +299,9 @@ class PluginManager:
                         f"'module_tree' in META."
                     )
                     continue
-
+                if not meta.get("is_dev"):
+                    meta["is_dev"] = True  # Mark as development plugin
+                    
                 # Create metadata
                 self.plugins.append(PluginMetaData(**meta))
 
@@ -306,35 +311,236 @@ class PluginManager:
                     f"'{package_name}': {e}"
                 )
         
-    def discover_online_plugins(self, channel: str) -> list[PluginMetaData]:
-        """Discover available plugins from conda channel (metadata only).
-        After downloading, plugins will be loaded via entry points."""
-        urls = [f"https://conda.anaconda.org/{channel}/label/main/noarch/repodata.json"]
-        pkgs = self._fetch_channel_pkgs(urls=urls)
+    # def discover_online_plugins(self, channel: str) -> list[PluginMetaData]:
+    #     """Discover available plugins from conda channel (metadata only).
+    #     After downloading, plugins will be loaded via entry points."""
+    #     urls = [f"https://conda.anaconda.org/{channel}/label/main/noarch/repodata.json",f"https://conda.anaconda.org/{channel}/label/main/win-64/repodata.json",f"https://conda.anaconda.org/{channel}/label/main/linux-64/repodata.json"]
+    #     pkgs = self._fetch_channel_pkgs(urls=urls)
+    #     online_plugins = []
+    #     for pkg_filename, info in pkgs.items():
+    #         meta = {
+    #             "name": info.get("name", ""),
+    #             "description": info.get("summary", "No description available."),
+    #             "authors": [info.get("author", "Unknown")],
+    #             "version": info.get("version", "1.0.0"),
+    #             "plugin_class": None,  # Will be loaded after download
+    #             "module_tree": None,  # Will be loaded after download
+    #         }
+    #         # Online plugins are returned as available for download only
+    #         # After download, they will be loaded via _load_entry_point_plugins()
+    #         online_plugins.append(PluginMetaData(**meta))
+    #     return online_plugins
+
+    def discover_online_plugins(
+        self,
+        channel: str
+    ) -> list[PluginMetaData]:
+        """
+        Discover available plugins from a Conda channel.
+
+        Selection rules:
+            1. Always search noarch.
+            2. Search the platform-specific subdir for the current system.
+            3. For the same plugin name, select the latest version.
+            4. If the same version exists in both noarch and the
+            platform-specific repository, prefer the platform-specific
+            package.
+        """
+
+        # ---------------------------------------------------------
+        # Determine current Conda platform
+        # ---------------------------------------------------------
+
+        system = platform.system()
+        machine = platform.machine().lower()
+
+        if system == "Windows":
+            if machine in ("amd64", "x86_64", "x64"):
+                platform_subdir = "win-64"
+            elif machine in ("x86", "i386", "i686"):
+                platform_subdir = "win-32"
+            else:
+                print(
+                    f"[WARN] Unsupported Windows architecture: {machine}"
+                )
+                return []
+
+        elif system == "Linux":
+            if machine in ("x86_64", "amd64"):
+                platform_subdir = "linux-64"
+            elif machine in ("aarch64", "arm64"):
+                platform_subdir = "linux-aarch64"
+            else:
+                print(
+                    f"[WARN] Unsupported Linux architecture: {machine}"
+                )
+                return []
+
+        elif system == "Darwin":
+            if machine in ("arm64", "aarch64"):
+                platform_subdir = "osx-arm64"
+            elif machine in ("x86_64", "amd64"):
+                platform_subdir = "osx-64"
+            else:
+                print(
+                    f"[WARN] Unsupported macOS architecture: {machine}"
+                )
+                return []
+
+        else:
+            print(
+                f"[WARN] Unsupported operating system: {system}"
+            )
+            return []
+
+        print(
+            f"[INFO] Discovering online plugins for "
+            f"{system} / {machine} ({platform_subdir})"
+        )
+
+        # ---------------------------------------------------------
+        # Build repository URLs
+        # ---------------------------------------------------------
+
+        base_url = f"https://conda.anaconda.org/{channel}/label/main"
+
+        urls = {
+            "noarch": f"{base_url}/noarch/repodata.json",
+            "platform": f"{base_url}/{platform_subdir}/repodata.json",
+        }
+
+        # ---------------------------------------------------------
+        # Fetch package metadata separately
+        # ---------------------------------------------------------
+
+        packages_by_source = {}
+
+        for source, url in urls.items():
+            try:
+                packages_by_source[source] = self._fetch_url_pkgs(url=url)
+            except Exception as e:
+                print(
+                    f"[WARN] Could not fetch {source} plugin metadata "
+                    f"from {url}: {e}"
+                )
+                packages_by_source[source] = {}
+
+        # ---------------------------------------------------------
+        # Select the best package for each plugin
+        # ---------------------------------------------------------
+
+        selected_packages = {}
+
+        # Platform-specific gets higher priority than noarch
+        # when versions are equal.
+        source_priority = {
+            "noarch": 0,
+            "platform": 1,
+        }
+
+        for source, packages in packages_by_source.items():
+
+            for pkg_filename, info in packages.items():
+
+                name = info.get("name", "")
+                version = info.get("version", "1.0.0")
+
+                if not name:
+                    continue
+
+                try:
+                    parsed_version = Version(str(version))
+                except Exception as e:
+                    print(
+                        f"[WARN] Invalid version '{version}' "
+                        f"for package '{pkg_filename}': {e}"
+                    )
+                    continue
+
+                candidate = {
+                    "filename": pkg_filename,
+                    "info": info,
+                    "source": source,
+                    "version": parsed_version,
+                    "priority": source_priority[source],
+                }
+
+                current = selected_packages.get(name)
+
+                if current is None:
+                    selected_packages[name] = candidate
+                    continue
+
+                # -------------------------------------------------
+                # Newer version wins
+                # -------------------------------------------------
+
+                if candidate["version"] > current["version"]:
+                    selected_packages[name] = candidate
+
+                # -------------------------------------------------
+                # Same version:
+                # platform-specific wins over noarch
+                # -------------------------------------------------
+
+                elif (
+                    candidate["version"] == current["version"]
+                    and candidate["priority"] > current["priority"]
+                ):
+                    selected_packages[name] = candidate
+
+        # ---------------------------------------------------------
+        # Create PluginMetaData
+        # ---------------------------------------------------------
+
         online_plugins = []
-        for pkg_filename, info in pkgs.items():
+
+        for name, selected in selected_packages.items():
+
+            info = selected["info"]
             meta = {
                 "name": info.get("name", ""),
-                "description": info.get("summary", "No description available."),
-                "authors": [info.get("author", "Unknown")],
-                "version": info.get("version", "1.0.0"),
-                "plugin_class": None,  # Will be loaded after download
-                "module_tree": None,  # Will be loaded after download
+                "description": info.get(
+                    "summary",
+                    "No description available."
+                ),
+                "authors": [
+                    info.get(
+                        "authors",
+                        "Unknown"
+                    )
+                ],
+                "version": info.get(
+                    "version",
+                    "1.0.0"
+                ),
+                "plugin_class": None,
+                "module_tree": None,
             }
-            # Online plugins are returned as available for download only
-            # After download, they will be loaded via _load_entry_point_plugins()
-            online_plugins.append(PluginMetaData(**meta))
+            plugin = PluginMetaData(**meta)
+            plugin.online_avl = True
+            plugin.download_size = round(
+                info.get("size", 0) / (1024 * 1024),  # Convert bytes to MB
+                2
+            )
+            plugin.online_ver = info.get(
+                "version",
+                "1.0.0"
+            )
+            plugin.conda_channel = channel
+            online_plugins.append(plugin)
+
         return online_plugins
 
-    def _fetch_channel_pkgs(self, urls: list[str]):
+    def _fetch_url_pkgs(self, url: str):
         """Fetch and parse repodata.json from a conda channel and return packages."""
+        resp = requests.get(url, timeout=20)
+        resp.raise_for_status()
+        repo_data = resp.json()
+
         pkgs = {}
-        for url in urls:
-            resp = requests.get(url, timeout=20)
-            resp.raise_for_status()
-            repo_data = resp.json()
-            pkgs.update(repo_data.get("packages", {}))
-            pkgs.update(repo_data.get("packages.conda", {}))
+        pkgs.update(repo_data.get("packages", {}))
+        pkgs.update(repo_data.get("packages.conda", {}))
         return pkgs
 
     # ---------------------------
@@ -429,6 +635,27 @@ class PluginManager:
                 return p
         return None
 
+    # ---------------------------
+    # Installed Plugin Registration
+    # ---------------------------
+    def register_installed_plugin(self, plugin: PluginMetaData) -> None:
+        self.state_manager.add_installed_plugin(plugin)
+        self.state_manager.flush()
+
+    def unregister_installed_plugin(self, plugin: PluginMetaData) -> None:
+        self.state_manager.remove_installed_plugin(plugin)
+        self.state_manager.flush()
+
+    def is_plugin_installed(self, plugin: PluginMetaData) -> bool:
+        return self.state_manager.is_plugin_installed(plugin)
+
+    def get_installed_plugins(self) -> list[PluginMetaData]:
+        return [
+            self.get_plugin_by_name(x)
+            for x in self.state_manager.get_installed_plugins()
+        ]
+    
+
 
 class StateManager:
     def __init__(self):
@@ -436,8 +663,9 @@ class StateManager:
         ).parent.parent / "data" / "ResourceFiles" / "plugins" / "plugin_state.json"
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self.plugins_paths_key = "__plugins_paths__"
-        self._lock = Lock()
-        self.states: dict[str, bool] = self._load_states()
+        self.installed_plugins_key = "__installed_plugins__"
+        self._lock = RLock()
+        self.states: dict = self._load_states()
         self._dirty = False
         print(f"[INFO] StateManager initialized")
 
@@ -477,7 +705,7 @@ class StateManager:
             self._atomic_save(self.states)
             self._dirty = False
 
-    def _atomic_save(self, data: dict[str, bool]):
+    def _atomic_save(self, data: dict):
         dir_name = os.path.dirname(self.state_file)
         if not dir_name:
             dir_name = "."
@@ -491,6 +719,7 @@ class StateManager:
         except Exception as e:
             print(
                 f"[ERROR] Failed to save state file {self.state_file}: {e}")
+
 
     # Developement Plugins 
     def get_plugin_paths(self) -> list[Path]:
@@ -524,4 +753,38 @@ class StateManager:
                 paths.remove(path)
                 self._dirty = True
 
-    
+    # Installed Plugins
+    def add_installed_plugin(self, plugin: PluginMetaData) -> None:
+        with self._lock:
+            installed_plugins = self.states.setdefault(
+                self.installed_plugins_key,
+                []
+            )
+            if plugin.name not in installed_plugins:
+                installed_plugins.append(plugin.name)
+                self._dirty = True
+
+    def remove_installed_plugin(self, plugin: PluginMetaData) -> None:
+        with self._lock:
+            installed_plugins = self.states.get(
+                self.installed_plugins_key,
+                []
+            )
+            if plugin.name in installed_plugins:
+                installed_plugins.remove(plugin.name)
+                self._dirty = True
+
+    def is_plugin_installed(self, plugin: PluginMetaData) -> bool:
+        with self._lock:
+            installed_plugins = self.states.get(
+                self.installed_plugins_key,
+                []
+            )
+            return plugin.name in installed_plugins
+
+    def get_installed_plugins(self) -> list[str]:
+        with self._lock:
+            return self.states.get(
+                self.installed_plugins_key,
+                []
+            )

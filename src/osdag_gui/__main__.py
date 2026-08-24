@@ -231,7 +231,7 @@ def gui():
         if not hasattr(app, "plugin_manager"):
             app.plugin_manager = PluginManager()
         if not hasattr(app, "plugin_manager_dialog"):
-            app.plugin_manager_dialog = PluginManagerDialog()
+            app.plugin_manager_dialog = PluginManagerDialog(parent=app.main_window)
         print("[INFO] Plugin Management System initialized.\n")
         
         # ============================

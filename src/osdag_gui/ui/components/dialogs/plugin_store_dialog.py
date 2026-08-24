@@ -45,6 +45,9 @@ class PluginWidget(QWidget):
 
     def __init__(self, plugin: PluginMetaData, parent=None):
         super().__init__(parent)
+        self.setObjectName("PluginWidget")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        
         self.plugin = plugin
 
         layout = QVBoxLayout(self)
@@ -53,17 +56,16 @@ class PluginWidget(QWidget):
 
         self.setSizePolicy(
             QSizePolicy.Expanding,
-            QSizePolicy.Fixed
+            QSizePolicy.Preferred
         )
 
         self.setStyleSheet("""
-            PluginWidget {
+            QWidget#PluginWidget {
                 background-color: #ffffff;
-                border: 1px solid #d8d8d8;
+                border: 2px solid #c8c8c8;
                 border-radius: 6px;
             }
         """)
-
         # ============================================================
         # HEADER
         # ============================================================
@@ -73,7 +75,7 @@ class PluginWidget(QWidget):
         header_layout.setContentsMargins(2, 0, 2, 0)
         header_layout.setSpacing(7)
 
-        self.name_label = QLabel(plugin.name.title())
+        self.name_label = QLabel(f"{self.plugin.name.title()} v{str(self.plugin.version)}")
         self.name_label.setStyleSheet("""
             QLabel {
                 font-size: 12pt;
@@ -115,15 +117,7 @@ class PluginWidget(QWidget):
 
         self.content = QLabel()
 
-        content_text = (
-            f"<b>{'Author' if len(self.plugin.authors) == 1 else 'Authors'}:</b> "
-            f"{', '.join(self.plugin.authors)}"
-        )
-
-        content_text += (
-            f"<br><b>Description:</b> "
-            f"{self.plugin.description}"
-        )
+        content_text = f"Download Size: {self.plugin.download_size} MB\n\n"
 
         self.content.setText(content_text)
         self.content.setWordWrap(True)
@@ -142,6 +136,8 @@ class PluginWidget(QWidget):
                 border: none;
             }
         """)
+        content_min_width = self.content.sizeHint().width() + 150
+        self.setMinimumWidth(content_min_width)
 
         content_layout.addWidget(self.content, stretch=1)
 
@@ -199,9 +195,6 @@ class PluginWidget(QWidget):
         self.btnDelete.clicked.connect(self._emit_delete)
         self.btnDownload.clicked.connect(self._emit_download)
         self.btnUpdate.clicked.connect(self._emit_update)
-
-        content_min_width = self.content.sizeHint().width() + 150
-        self.setMinimumWidth(content_min_width)
 
 
     def _emit_download(self):
@@ -266,26 +259,65 @@ class PluginWidget(QWidget):
         elif state == "deleting":
             self.set_status("Deleting...")
             self.btnDelete.setVisible(True)
+            self.btnDelete.setEnabled(False)
 
         elif state == "error":
             self.set_status("Operation failed")
+            self.btnDownload.setVisible(True)
 
 class PluginStoreDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.plugin_manager = QApplication.instance().plugin_manager
+        self.channel = "zehen-249"
         self.plugins: list[PluginMetaData] = self.plugin_manager.discover_online_plugins(
-            channel="zehen-249")
+            channel=self.channel)
         self.local_plugins: list[PluginMetaData] = self.plugin_manager.discover_local_plugins(
         )
         self.updates_available = self._check_for_updates()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setObjectName("PluginManagerDialog")
+        self.setObjectName("PluginStoreDialog")
         self.setWindowIcon(QIcon(":/images/osdag_logo.png"))
 
+        # Size dialog relative to parent window
+        if parent is not None:
+            parent_size = parent.size()
+
+            width = int(parent_size.width() * 0.80)
+            height = int(parent_size.height() * 0.80)
+
+            self.resize(width, height)
+
+            # Keep the dialog usable on smaller parent windows
+            self.setMinimumSize(
+                min(800, parent_size.width()),
+                min(600, parent_size.height())
+            )
+
+            # Center over parent
+            parent_geometry = parent.frameGeometry()
+            self.move(
+                parent_geometry.center()
+                - self.rect().center()
+            )
+        else:
+            # Sensible fallback when no parent is supplied
+            self.resize(1000, 700)
+            self.setMinimumSize(800, 600)
+
+        # Layout and style
+        self.setStyleSheet("""
+            QDialog#PluginStoreDialog { background-color: #ffffff; border: 2px solid #90AF13; }
+            QWidget#ContentWidget { background-color: #ffffff; }
+            QPushButton { background-color: #90AF13; color: white; border: none; border-radius: 5px;
+                            padding: 5px 20px; font-size: 12px; font-weight: bold; }
+            QPushButton:hover { background-color: #7A9611; }
+            QPushButton:pressed { background-color: #6B850F; }
+        """)
+
         mainLayout = QVBoxLayout(self)
-        mainLayout.setContentsMargins(0, 0, 0, 0)
+        mainLayout.setContentsMargins(1, 1, 1, 1)
         mainLayout.setSpacing(0)
 
         # Title bar
@@ -305,7 +337,7 @@ class PluginStoreDialog(QDialog):
             ":/vectors/Osdag_light.svg",
             self
         )
-        logo_height = 85
+        logo_height = max(55, min(85, int(self.height() * 0.10)))
         svg_size = self.logoLabel.renderer().defaultSize()
 
         if not svg_size.isEmpty() and svg_size.height() > 0:
@@ -334,7 +366,6 @@ class PluginStoreDialog(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
-        scroll.setWidgetResizable(True)
 
         scroll.setStyleSheet("""
             QScrollArea {
@@ -345,6 +376,76 @@ class PluginStoreDialog(QDialog):
             QScrollArea > QWidget > QWidget {
                 background: #F4F4F4;
             }
+
+            /* Vertical scrollbar */
+            QScrollBar:vertical {
+                background: #F4F4F4;
+                width: 10px;
+                margin: 0px;
+                border: none;
+            }
+
+            QScrollBar::handle:vertical {
+                background: #B8C58A;
+                min-height: 35px;
+                border-radius: 5px;
+                margin: 1px;
+            }
+
+            QScrollBar::handle:vertical:hover {
+                background: #90AF13;
+            }
+
+            QScrollBar::handle:vertical:pressed {
+                background: #7A9611;
+            }
+
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {
+                height: 0px;
+                border: none;
+                background: none;
+            }
+
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {
+                background: transparent;
+            }
+
+            /* Horizontal scrollbar */
+            QScrollBar:horizontal {
+                background: #F4F4F4;
+                height: 10px;
+                margin: 0px;
+                border: none;
+            }
+
+            QScrollBar::handle:horizontal {
+                background: #B8C58A;
+                min-width: 35px;
+                border-radius: 5px;
+                margin: 1px;
+            }
+
+            QScrollBar::handle:horizontal:hover {
+                background: #90AF13;
+            }
+
+            QScrollBar::handle:horizontal:pressed {
+                background: #7A9611;
+            }
+
+            QScrollBar::add-line:horizontal,
+            QScrollBar::sub-line:horizontal {
+                width: 0px;
+                border: none;
+                background: none;
+            }
+
+            QScrollBar::add-page:horizontal,
+            QScrollBar::sub-page:horizontal {
+                background: transparent;
+            }
         """)
         contentLayout.addWidget(scroll)
 
@@ -353,7 +454,7 @@ class PluginStoreDialog(QDialog):
 
         self.pluginLayout = QVBoxLayout(self.pluginContainer)
         self.pluginLayout.setContentsMargins(10, 10, 10, 10)
-        self.pluginLayout.setSpacing(10)
+        self.pluginLayout.setSpacing(12)
         self.pluginLayout.setAlignment(Qt.AlignTop)
 
         self.pluginContainer.setSizePolicy(
@@ -384,8 +485,6 @@ class PluginStoreDialog(QDialog):
 
 
     def delete_plugin(self, plugin: PluginMetaData, widget: PluginWidget):
-        widget.btnDelete.setEnabled(False)
-        widget.name_label.setText(f"<b>{plugin.name}</b>")
         widget.set_state("deleting")
         QApplication.processEvents()  # ensures repaint before thread starts
 
@@ -412,17 +511,13 @@ class PluginStoreDialog(QDialog):
     def _on_delete_finished(self, success, widget, plugin):
         if success:
             print(f"[INFO] Successfully deleted plugin: {plugin.name}")
-            widget.btnDelete.setVisible(False)
-            widget.btnDownload.setVisible(True)
-            widget.btnDownload.setEnabled(True)
-            widget.name_label.setText(f"<b>{plugin.name}</b>")
+            self.plugin_manager.unregister_installed_plugin(plugin)
+            widget.set_state("available")
         else:
             print(f"[INFO] Failed to delete plugin: {plugin.name}")
             widget.set_state("installed")
-            widget.btnDelete.setEnabled(True)
 
     def download_plugin(self, plugin: PluginMetaData, widget: PluginWidget):
-        widget.btnDownload.setEnabled(False)
         widget.set_state("downloading")
         QApplication.processEvents()  # ensures repaint before thread starts
 
@@ -449,18 +544,13 @@ class PluginStoreDialog(QDialog):
     def _on_download_finished(self, success, widget, plugin):
         if success:
             print(f"[INFO] Successfully downloaded plugin: {plugin.name}")
-            widget.btnDownload.setVisible(False)
-            widget.btnDelete.setVisible(True)
-            widget.btnDelete.setEnabled(True)
+            self.plugin_manager.register_installed_plugin(plugin)
             widget.set_state("installed")
         else:
             print(f"[INFO] Failed to download plugin: {plugin.name}")
             widget.set_state("error")
-            widget.btnDownload.setEnabled(True)
 
     def update_plugin(self, plugin: PluginMetaData, widget: PluginWidget):
-        widget.btnUpdate.setEnabled(False)
-        widget.name_label.setText(f"<b>{plugin.name}</b>")
         widget.set_state("updating")
         QApplication.processEvents()  # ensures repaint before thread starts
 
@@ -487,22 +577,17 @@ class PluginStoreDialog(QDialog):
     def _on_update_finished(self, success, widget, plugin):
         if success:
             print(f"[INFO] Successfully updated plugin: {plugin.name}")
-            widget.btnUpdate.setVisible(False)
-            widget.btnDownload.setVisible(False)
-            widget.btnDelete.setVisible(True)
-            widget.btnDelete.setEnabled(True)
             widget.set_state("installed")
         else:
             print(f"[INFO] Failed to update plugin: {plugin.name}")
             widget.set_state("error")
-            widget.btnUpdate.setEnabled(True)
 
     def start_worker(self, worker):
         QMetaObject.invokeMethod(worker, "run", Qt.QueuedConnection)
 
     def refresh_plugins(self):
         # Re-discover both local and online plugins
-        self.plugins = self.plugin_manager.discover_online_plugins()
+        self.plugins = self.plugin_manager.discover_online_plugins(channel="zehen-249")
         self.local_plugins = self.plugin_manager.discover_local_plugins()
 
         # Clear all plugin widgets from the layout
@@ -534,7 +619,7 @@ class PluginStoreDialog(QDialog):
         self.plugins = list(latest.values())
 
         for plugin in self.plugins:
-            pw = PluginWidget(plugin=plugin, parent=self)
+            pw = PluginWidget(plugin=plugin)
 
             pw.download.connect(
                 lambda plugin, w=pw: self.download_plugin(plugin, w))
@@ -543,8 +628,8 @@ class PluginStoreDialog(QDialog):
             pw.update.connect(
                 lambda plugin, w=pw: self.update_plugin(plugin, w))
 
-            pw.setMinimumHeight(105)
-            pw.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            pw.setMinimumHeight(90)
+            pw.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
             is_downloaded = any(
                 lp.name == plugin.name for lp in self.local_plugins)
@@ -554,6 +639,9 @@ class PluginStoreDialog(QDialog):
                     up.name == plugin.name
                     for up in self.updates_available
                 )
+
+                if self.plugin_manager.is_plugin_installed(plugin):
+                    pw.set_state("installed")
 
                 if is_update_available:
                     pw.set_state("update_available")
@@ -568,7 +656,7 @@ class PluginStoreDialog(QDialog):
     def _check_for_updates(self):
         installed_plugins = self.plugin_manager.discover_local_plugins()
         online_plugins = self.plugin_manager.discover_online_plugins(
-            channel="zehen-249")
+            channel=self.channel)
         updates_available = []
         for installed in installed_plugins:
             for online in online_plugins:

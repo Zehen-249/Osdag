@@ -1412,10 +1412,10 @@ class MainWindow(QMainWindow):
         super().show()
 
     # ============= Resize implementation ends ===============
-    def find_module(self, module_name, plugins_dict):
+    def find_module(self, module_key, plugins_dict):
         for plugin_name, module_tree in plugins_dict.items():
 
-            result = self.search_tree(module_name, module_tree)
+            result = self.search_tree(module_key, module_tree)
 
             if result is not None:
                 return {
@@ -1425,7 +1425,7 @@ class MainWindow(QMainWindow):
 
         return None
 
-    def search_tree(self, module_name, tree, path=None):
+    def search_tree(self, module_key, tree, path=None):
         if path is None:
             path = []
 
@@ -1438,7 +1438,7 @@ class MainWindow(QMainWindow):
                     continue
 
                 # (key, name, image)
-                if len(module) >= 2 and module[0] == module_name:
+                if len(module) >= 2 and module[0] == module_key:
                     return {
                         "path": path,
                         "module": module
@@ -1451,7 +1451,7 @@ class MainWindow(QMainWindow):
             for category, subtree in tree.items():
 
                 result = self.search_tree(
-                    module_name,
+                    module_key,
                     subtree,
                     path + [category]
                 )
