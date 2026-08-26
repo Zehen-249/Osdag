@@ -47,3 +47,5 @@ fix_relative_imports.py
 verify_imports.py
 # Internal development notes — not for version control
 references/
+!installer/license.txt
+**/osdag_core/**/plugin_state.json

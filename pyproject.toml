@@ -18,8 +18,8 @@ where = ["src"]
 
 
 [project]
-name = "osdag"
-dynamic = ["version"]
+name = "osdag_for_bridge"
+version = "1.0.0"
 dependencies = ["PyQt5", "PySide6", "requests", "pylatex", "numpy", "PyYaml", "PyGithub", "Click", "navcube"]
 requires-python = ">= 3.11,<3.13"
 description = "Open steel design and graphics"
@@ -28,5 +28,5 @@ license = {file = "LICENSE"}
 keywords = ["steel design", "civil engineering", "engineering"]
 
 [project.scripts]
-osdag = "osdag_gui.__main__:main"
+osdag_for_bridge = "osdag_gui.__main__:main"
 
