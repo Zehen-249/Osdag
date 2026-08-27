@@ -86,7 +86,7 @@ class PluginManager:
         self.plugins_entry_point = metadata.entry_points().select(group="osdag.plugins")
         self.window_plugins = defaultdict()
         print(f"[INFO] PluginManager initialized.")
-
+        
     # ---------------------------
     # Plugin Discovery (Local Under Development & Installed Plugins)
     # ---------------------------
@@ -133,9 +133,13 @@ class PluginManager:
                     continue
 
                 # Create metadata
-                self.plugins.append(PluginMetaData(**meta))
-                
-                
+                plugin = PluginMetaData(**meta)
+                if not self.state_manager.is_registered(plugin):
+                    self.activate(plugin)
+                    self.state_manager.add_installed_plugin(plugin)
+
+                self.plugins.append(plugin)
+
                 # if "osdag_plugin_" in name:
                 #     name = name[len("osdag_plugin_"):]
                 #     meta["name"] = name
@@ -568,8 +572,12 @@ class PluginManager:
             self.conda_exe,
             "install",
             "--prefix", os.environ["CONDA_PREFIX"],
-            f"zehen-249::{plugin.name}",
-            "-y"
+            f"{plugin.conda_channel}::{plugin.name}",
+            "-y",
+            "-c", "osdag",
+            "-c", "zehen-249",
+            "-c", "geompy",
+            "-c", "conda-forge",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         # print(result.stdout)
@@ -613,8 +621,12 @@ class PluginManager:
             self.conda_exe,
             "update",
             "--prefix", os.environ["CONDA_PREFIX"],
-            f"{plugin.name}",
-            "-y"
+            f"{plugin.conda_channel}::{plugin.name}",
+            "-y",
+            "-c", "osdag",
+            "-c", "zehen-249",
+            "-c", "geompy",
+            "-c", "conda-forge",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         # print(result.stdout)
@@ -640,14 +652,12 @@ class PluginManager:
     # ---------------------------
     def register_installed_plugin(self, plugin: PluginMetaData) -> None:
         self.state_manager.add_installed_plugin(plugin)
-        self.state_manager.flush()
 
     def unregister_installed_plugin(self, plugin: PluginMetaData) -> None:
         self.state_manager.remove_installed_plugin(plugin)
-        self.state_manager.flush()
 
-    def is_plugin_installed(self, plugin: PluginMetaData) -> bool:
-        return self.state_manager.is_plugin_installed(plugin)
+    def is_registered(self, plugin: PluginMetaData) -> bool:
+        return self.state_manager.is_registered(plugin)
 
     def get_installed_plugins(self) -> list[PluginMetaData]:
         return [
@@ -662,6 +672,10 @@ class StateManager:
         self.state_file = Path(__file__).resolve(
         ).parent.parent / "data" / "ResourceFiles" / "plugins" / "plugin_state.json"
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        # Create the state file if it doesn't exist
+        if not self.state_file.exists():
+            with open(self.state_file, 'w', encoding='utf-8') as f:
+                json.dump({}, f, indent=4)
         self.plugins_paths_key = "__plugins_paths__"
         self.installed_plugins_key = "__installed_plugins__"
         self._lock = RLock()
@@ -688,6 +702,10 @@ class StateManager:
     def update_state(self, plugin: PluginMetaData, status: bool) -> None:
         with self._lock:
             prev = self.states.get(plugin.id)
+            if prev is None:
+                plugin.status = True
+                self.states[plugin.id] = plugin.status
+                return
             if prev != status:
                 self.states[plugin.id] = status
                 self._dirty = True
@@ -762,7 +780,8 @@ class StateManager:
             )
             if plugin.name not in installed_plugins:
                 installed_plugins.append(plugin.name)
-                self._dirty = True
+            self._dirty = True
+            self.flush()
 
     def remove_installed_plugin(self, plugin: PluginMetaData) -> None:
         with self._lock:
@@ -772,9 +791,12 @@ class StateManager:
             )
             if plugin.name in installed_plugins:
                 installed_plugins.remove(plugin.name)
-                self._dirty = True
+            self.states.remove(plugin.id)  # Remove the plugin's status as well
+            self._dirty = True
+            self.flush()
 
-    def is_plugin_installed(self, plugin: PluginMetaData) -> bool:
+
+    def is_registered(self, plugin: PluginMetaData) -> bool:
         with self._lock:
             installed_plugins = self.states.get(
                 self.installed_plugins_key,

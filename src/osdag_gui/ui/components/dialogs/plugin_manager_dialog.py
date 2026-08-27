@@ -52,7 +52,9 @@ class PluginWidget(QWidget):
         header_layout.setSpacing(5)
 
         self.name_label = QLabel(
-            f"{'<b>'+plugin.name.title()+' v'+str(plugin.version)+'</b> (Dev Plugin)' if plugin.is_dev else '<b>'+plugin.name.title()+' v'+str(plugin.version)+'</b>'}")
+            f"<b>{plugin.name.title()} v{plugin.version}</b>"
+            f"{' (Dev Plugin)' if plugin.is_dev else ''}"
+        )
         self.name_label.setStyleSheet(
             "font-weight: bold; font-size: 12pt; color: #90AF13;")
 

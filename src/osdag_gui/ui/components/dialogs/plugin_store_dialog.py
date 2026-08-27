@@ -269,6 +269,7 @@ class PluginStoreDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.plugin_manager = QApplication.instance().plugin_manager
+        self.plugin_manager_dialog = QApplication.instance().plugin_manager_dialog
         self.channel = "zehen-249"
         self.plugins: list[PluginMetaData] = self.plugin_manager.discover_online_plugins(
             channel=self.channel)
@@ -546,7 +547,12 @@ class PluginStoreDialog(QDialog):
             print(f"[INFO] Successfully downloaded plugin: {plugin.name}")
             self.plugin_manager.register_installed_plugin(plugin)
             widget.set_state("installed")
-            # widget.name_label.setText(f"<b>{plugin.name}</b>")
+
+            # Activate by default
+            self.plugin_manager.activate(plugin)
+            self.plugin_manager_dialog.activate_plugin(plugin)
+            self.plugin_manager_dialog.refresh_plugins()
+
         else:
             print(f"[INFO] Failed to download plugin: {plugin.name}")
             widget.set_state("error")
@@ -641,7 +647,7 @@ class PluginStoreDialog(QDialog):
                     for up in self.updates_available
                 )
 
-                if self.plugin_manager.is_plugin_installed(plugin):
+                if self.plugin_manager.is_registered(plugin):
                     pw.set_state("installed")
 
                 if is_update_available:
@@ -684,5 +690,4 @@ class PluginStoreDialog(QDialog):
         self.accept()
 
     def _refreshManager(self):
-        self.plugin_manager_dialog = QApplication.instance().plugin_manager_dialog
         self.plugin_manager_dialog.refresh_plugins()
