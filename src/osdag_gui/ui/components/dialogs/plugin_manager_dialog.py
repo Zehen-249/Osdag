@@ -224,7 +224,6 @@ class PluginManagerDialog(QDialog):
         self.data_navbar_icons = Data.NAVBAR_ICONS
         self.active_plugins: dict = Data.PLUGINS
         self.app = QApplication.instance()
-        self.main_window = self.app.main_window
 
         self.setWindowFlag(Qt.FramelessWindowHint, True)
         self.setAttribute(Qt.WA_StyledBackground, True)
