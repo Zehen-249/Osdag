@@ -1537,7 +1537,6 @@ class MainWindow(QMainWindow):
             print(f"[INFO] Attempting to open plugin for card '{card_title}'")
             module = self.find_module(card_title, Data().PLUGINS)
             if module:
-                print(f"[INFO] Found module for card '{card_title}': {module}")
                 self.common_open_plugin(module)
             else:
                 print(f"[WARNING] No module found for card '{card_title}'")
@@ -1971,9 +1970,12 @@ class MainWindow(QMainWindow):
     # To open the recent module
     def handle_open_module(self, key:str):
         func = get_module_function(key)
-        if func != 'None':
-            func = getattr(self, func)
-            func() # Open the Releated Module
+        if func != None:
+            if callable(func):
+                func() # call the function directly if it's already a callable (plugin case)
+            else:
+                func = getattr(self, func) # Get the function reference if it's a string
+                func() # Open the Releated Module
 
     # To handle the click on open project of any recent project
     def handle_open_project(self, record: dict):
@@ -2050,7 +2052,7 @@ class MainWindow(QMainWindow):
             print(f"[INFO] Osi File Belongs to: {module}")
 
             func = get_module_function(module)
-            if func == 'None':
+            if func == None:
                 CustomMessageBox(
                     title="Information",
                     text="Please load the appropriate Input",
@@ -2058,8 +2060,8 @@ class MainWindow(QMainWindow):
                 ).exec()
                 print("[INFO] Module Under Development.")
                 return
-            func = getattr(self, func)
-            func()
+            func = getattr(self, func) if not callable(func)  else func # Get the function reference if it's a string, else use it directly (plugin case)
+            func() 
             # Set variables in template page because it is opened project
             self.main_widget_instance.setDictToUserInputs(uiObj)
             self.main_widget_instance.project_id = id
