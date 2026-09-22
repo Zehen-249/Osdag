@@ -270,6 +270,7 @@ class PluginStoreDialog(QDialog):
         super().__init__(parent)
         self.plugin_manager = QApplication.instance().plugin_manager
         self.plugin_manager_dialog = QApplication.instance().plugin_manager_dialog
+        self.state_manager = self.plugin_manager.state_manager
         self.channel = "zehen-249"
         self.plugins: list[PluginMetaData] = self.plugin_manager.discover_online_plugins(
             channel=self.channel)
@@ -664,18 +665,21 @@ class PluginStoreDialog(QDialog):
         installed_plugins = self.plugin_manager.discover_local_plugins()
         online_plugins = self.plugin_manager.discover_online_plugins(
             channel=self.channel)
+
+        online_by_name = {plugin.name: plugin for plugin in online_plugins}
         updates_available = []
         for installed in installed_plugins:
-            for online in online_plugins:
-                if online.name != installed.name:
-                    continue
+            online = online_by_name.get(installed.name)
 
-                try:
-                    if version.parse(online.version) > version.parse(installed.version):
-                        updates_available.append(online)
-                except Exception:
-                    # If version parsing fails, skip this comparison
-                    pass
+            if online is None:
+                continue
+
+            try:
+                if version.parse(online.version) > version.parse(installed.version):
+                    updates_available.append(online)
+            except Exception:
+                # If version parsing fails, skip this comparison
+                pass
 
         return updates_available
 

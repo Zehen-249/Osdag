@@ -362,44 +362,27 @@ class PluginManager:
 
         system = platform.system()
         machine = platform.machine().lower()
+        _PLATFORM_SUBDIRS = {
+            ("Windows", "amd64"): "win-64",
+            ("Windows", "x86_64"): "win-64",
+            ("Windows", "x64"): "win-64",
+            ("Windows", "x86"): "win-32",
+            ("Windows", "i386"): "win-32",
+            ("Windows", "i686"): "win-32",
+            ("Linux", "x86_64"): "linux-64",
+            ("Linux", "amd64"): "linux-64",
+            ("Linux", "aarch64"): "linux-aarch64",
+            ("Linux", "arm64"): "linux-aarch64",
+            ("Darwin", "arm64"): "osx-arm64",
+            ("Darwin", "aarch64"): "osx-arm64",
+            ("Darwin", "x86_64"): "osx-64",
+            ("Darwin", "amd64"): "osx-64",
+        }
 
-        if system == "Windows":
-            if machine in ("amd64", "x86_64", "x64"):
-                platform_subdir = "win-64"
-            elif machine in ("x86", "i386", "i686"):
-                platform_subdir = "win-32"
-            else:
-                print(
-                    f"[WARN] Unsupported Windows architecture: {machine}"
-                )
-                return []
+        platform_subdir = _PLATFORM_SUBDIRS.get((system, machine))
 
-        elif system == "Linux":
-            if machine in ("x86_64", "amd64"):
-                platform_subdir = "linux-64"
-            elif machine in ("aarch64", "arm64"):
-                platform_subdir = "linux-aarch64"
-            else:
-                print(
-                    f"[WARN] Unsupported Linux architecture: {machine}"
-                )
-                return []
-
-        elif system == "Darwin":
-            if machine in ("arm64", "aarch64"):
-                platform_subdir = "osx-arm64"
-            elif machine in ("x86_64", "amd64"):
-                platform_subdir = "osx-64"
-            else:
-                print(
-                    f"[WARN] Unsupported macOS architecture: {machine}"
-                )
-                return []
-
-        else:
-            print(
-                f"[WARN] Unsupported operating system: {system}"
-            )
+        if platform_subdir is None:
+            print(f"[WARN] Unsupported platform: {system} / {machine}")
             return []
 
         print(
@@ -424,15 +407,23 @@ class PluginManager:
 
         packages_by_source = {}
 
-        for source, url in urls.items():
-            try:
-                packages_by_source[source] = self._fetch_url_pkgs(url=url)
-            except Exception as e:
-                print(
-                    f"[WARN] Could not fetch {source} plugin metadata "
-                    f"from {url}: {e}"
-                )
-                packages_by_source[source] = {}
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {
+                executor.submit(self._fetch_url_pkgs, url): source
+                for source, url in urls.items()
+            }
+
+            for future in as_completed(futures):
+                source = futures[future]
+
+                try:
+                    packages_by_source[source] = future.result()
+                except Exception as e:
+                    print(
+                        f"[WARN] Could not fetch {source} plugin metadata: {e}"
+                    )
+                    packages_by_source[source] = {}
 
         # ---------------------------------------------------------
         # Select the best package for each plugin
