@@ -84,7 +84,6 @@ class PluginManager:
         self.plugins: list[PluginMetaData] = []
         self.dev_plugins_paths: list[Path] = self.state_manager.get_plugin_paths()
         self.plugins_entry_point = metadata.entry_points().select(group="osdag.plugins")
-        self.window_plugins = defaultdict()
         print(f"[INFO] PluginManager initialized.")
         
     # ---------------------------
