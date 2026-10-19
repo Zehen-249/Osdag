@@ -33,8 +33,6 @@ class PluginMetaData:
     version: str = field(default_factory=lambda: "1.0.0")
     status: bool = field(default_factory=lambda: False)
     plugin_class: Type[WindowPlugin] | Type[WidgetPlugin] = field(default_factory=lambda: None)
-    # module: object = field(default_factory=lambda: None)
-    # entry_class: object = field(default_factory=lambda: None)
     module_tree: list[tuple] | dict[str,list[tuple]] = field(default_factory=lambda: [("", "", None)])
     icons: list[str] = field(default_factory=lambda: [":/images/add_ons.png", ":/images/add_ons_clicked.png"])
     is_dev: bool = field(default_factory=lambda: False)
@@ -42,6 +40,7 @@ class PluginMetaData:
     download_size: int = field(init=False)
     online_ver: str = field(init=False)
     conda_channel: str = field(init=False)
+    is_installed: bool = field(init=False)
 
     def __post_init__(self):
         self.id = str(
@@ -84,7 +83,6 @@ class PluginManager:
         self.plugins: list[PluginMetaData] = []
         self.dev_plugins_paths: list[Path] = self.state_manager.get_plugin_paths()
         self.plugins_entry_point = metadata.entry_points().select(group="osdag.plugins")
-        print(f"[INFO] PluginManager initialized.")
         
     # ---------------------------
     # Plugin Discovery (Local Under Development & Installed Plugins)
@@ -106,9 +104,14 @@ class PluginManager:
                 module = ep.load()
                 if not getattr(module, "IS_OSDAG_PLUGIN", False):
                     print(
-                        f"[WARN] Installed Plugin '{ep.name}' is not a valid OSDAG plugin.")
+                        f"[WARN] Installed Osdag Plugin '{ep.name}' is not a valid plugin. IS_OSDAG_PLUGIN is not set to True.")
                     continue
-                meta = getattr(module, "META", {})
+                meta = getattr(module, "META", None)
+                if not meta:
+                    print(
+                        f"[WARN] Installed plugin '{ep.name}' is missing META data."
+                    )
+                    continue
                 if not isinstance(meta, dict):
                     print(
                         f"[WARN] Installed plugin '{ep.name}' has invalid META."
@@ -141,91 +144,9 @@ class PluginManager:
                     plugin.status = self.state_manager.get_status(plugin)
                 self.plugins.append(plugin)
 
-                # if "osdag_plugin_" in name:
-                #     name = name[len("osdag_plugin_"):]
-                #     meta["name"] = name
-                # entry_point = getattr(module, "ENTRY_POINT", None)
-                # entry_class = self._resolve_entry_class(
-                #     module, name, entry_point)
-                # if entry_class:
-                #     self.plugins.append(PluginMetaData(
-                #         **meta, status=False, module=module, entry_class=entry_class))
-                # else:
-                #     print(
-                #         f"[WARN] Entry point '{ep.name}' could not resolve entry class.")
-                #     continue
         except Exception as e:
             print(f"[WARN] Installed plugin loading failed: {e}")
 
-    # def _load_dev_plugins(self) -> None:
-    #     if not self.dev_plugins_paths:
-    #         print("[INFO] No development plugins paths configured.")
-    #         return
-    #     for plugin_root in self.dev_plugins_paths:
-    #         if not plugin_root.exists():
-    #             print(
-    #                 f"[WARN] Development plugins path '{plugin_root}' does not exist.")
-    #             continue
-    #         if not plugin_root.is_dir():
-    #             print(
-    #                 f"[WARN] Development plugins path '{plugin_root}' is not a directory.")
-    #             continue
-
-    #         # Add workspace root to sys.path so plugins can be imported
-    #         workspace_root = plugin_root.parent
-    #         if str(workspace_root) not in sys.path:
-    #             sys.path.insert(0, str(workspace_root))
-
-    #         for pkg_dir in plugin_root.iterdir():
-    #             if not pkg_dir.is_dir():
-    #                 continue
-    #             for _, name, ispkg in pkgutil.iter_modules([str(pkg_dir)]):
-    #                 if not ispkg:
-    #                     continue
-    #                 if name in [p.name for p in self.plugins]:
-    #                     print(
-    #                         f"[INFO] Development plugin '{name}' is already loaded from osdag.plugins entry point.")
-    #                     continue
-    #                 try:
-    #                     module = importlib.import_module(
-    #                         f"{pkg_dir.name}.{name}")
-    #                     if not getattr(module, "IS_OSDAG_PLUGIN", False):
-    #                         print(
-    #                             f"[WARN] Development plugin '{name}' is not a valid OSDAG plugin.")
-    #                         continue
-    #                     meta = getattr(module, "META", {})
-    #                     plugin_name = meta.get("name")
-    #                     if plugin_name is None:
-    #                         print(f"[WARN] Development plugin '{name}' is missing 'name'.")
-    #                         continue
-    #                     self.plugins.append(PluginMetaData(
-    #                         **meta, status=False, plugin_class=entry_class))
-    #                     # entry_class = self._resolve_entry_class(
-    #                     #     module, plugin_name, getattr(module, "ENTRY_POINT", None))
-    #                     # if entry_class:
-    #                     #     self.plugins.append(PluginMetaData(
-    #                     #         **meta, status=False, plugin_class=entry_class))
-    #                     # else:
-    #                     #     print(
-    #                     #         f"[WARN] Development plugin '{name}' could not resolve entry class.")
-    #                 except Exception as e:
-    #                     print(f"[WARN] Could not load Development plugin '{name}': {e}")
-
-    # # def _resolve_entry_class(self, module: ModuleType, name: str, entry_path: str) -> object | None:
-    #     if not entry_path:
-    #         print(f"[WARN] Plugin '{name}' missing 'ENTRY_POINT'.")
-    #         return None
-    #     try:
-    #         parts = entry_path.split(".")
-    #         submodule_name = ".".join(parts[:-1])
-    #         class_name = parts[-1]
-    #         entry_module = importlib.import_module(
-    #             f"{module.__name__}" + (f".{submodule_name}" if submodule_name else ""))
-    #         return getattr(entry_module, class_name)
-    #     except Exception as e:
-    #         print(
-    #             f"[WARN] Could not resolve entry class '{entry_path}' for plugin '{name}': {e}")
-    #         return None
 
     def _load_dev_plugins(self) -> None:
         for plugin_path in self.dev_plugins_paths:
@@ -676,7 +597,6 @@ class StateManager:
         self._lock = RLock()
         self.states: dict = self._load_states()
         self._dirty = False
-        print(f"[INFO] StateManager initialized")
 
     def _load_states(self):
         if not os.path.exists(self.state_file):
@@ -687,21 +607,32 @@ class StateManager:
                     return json.load(f)
             except (json.JSONDecodeError, OSError) as e:
                 print(
-                    f"[WARN] Could not load state file {self.state_file}: {e}")
+                    f"[WARN] Could not load plugin state file {self.state_file}: {e}")
                 return {}
 
     def get_status(self, plugin: PluginMetaData) -> bool:
         with self._lock:
-            return self.states.get(plugin.id, False)
-
-    def update_state(self, plugin: PluginMetaData, status: bool) -> None:
+            state = self.states.get(plugin.id, {})
+            return state["activated"] if "activated" in state else False
+        
+    def get_installed(self, plugin: PluginMetaData) -> bool:
         with self._lock:
-            prev = self.states.get(plugin.id)
-            if prev is None:
-                self.states[plugin.id] = plugin.status
-                return
-            if prev != status:
-                self.states[plugin.id] = status
+            state = self.states.get(plugin.id, {})
+            return state["installed"] if "installed" in state else False
+    
+    def get_state(self, plugin: PluginMetaData) -> dict:
+        with self._lock:
+            return self.states.get(plugin.id, {}).copy() if plugin.id in self.states else {}
+        
+    def update_state(self, plugin: PluginMetaData) -> None:
+        with self._lock:
+            plugin_id = plugin.id
+            new_state = {
+                "activated": plugin.status,
+                "installed": plugin.is_installed,
+            }
+            if self.states[plugin_id] != new_state:
+                self.states[plugin_id] = new_state
                 self._dirty = True
 
     def delete_state(self, plugin: PluginMetaData) -> None:
@@ -714,23 +645,46 @@ class StateManager:
         with self._lock:
             if not self._dirty:
                 return
-            self._atomic_save(self.states)
+            try:    
+                self._atomic_save(self.states)
+            except RuntimeError as e:
+                print(
+                    f"[ERROR] Failed to save plugin state file {self.state_file}: {e}")
+                return
             self._dirty = False
 
-    def _atomic_save(self, data: dict):
-        dir_name = os.path.dirname(self.state_file)
-        if not dir_name:
-            dir_name = "."
+    def _atomic_save(self, data: dict) -> None:
+        temp_name = None
+
         try:
-            with tempfile.NamedTemporaryFile("w", dir=dir_name, delete=False, encoding="utf-8") as tmp:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                dir=self.state_file.parent,
+                prefix=f".{self.state_file.name}.",
+                suffix=".tmp",
+                delete=False,
+                encoding="utf-8",
+            ) as tmp:
+                temp_name = tmp.name
                 json.dump(data, tmp, indent=4)
                 tmp.flush()
                 os.fsync(tmp.fileno())
-                temp_name = tmp.name
+
+            # Atomic when source and destination are on the same filesystem.
             os.replace(temp_name, self.state_file)
-        except Exception as e:
-            print(
-                f"[ERROR] Failed to save state file {self.state_file}: {e}")
+            temp_name = None
+
+        except (OSError, TypeError, ValueError) as e:
+            raise RuntimeError(
+                f"Failed to save plugin state file {self.state_file}"
+            ) from e
+
+        finally:
+            if temp_name is not None:
+                try:
+                    os.unlink(temp_name)
+                except OSError:
+                    pass
 
 
     # Developement Plugins 
@@ -741,10 +695,7 @@ class StateManager:
         
     def add_plugin_path(self, path: str | Path) -> None:
         with self._lock:
-            paths = self.states.setdefault(
-                self.plugins_paths_key,
-                []
-            )
+            paths = self.states.get(self.plugins_paths_key, [])
 
             path = str(Path(path).resolve())
 
@@ -799,8 +750,9 @@ class StateManager:
             return plugin.name in installed_plugins
 
     def get_installed_plugins(self) -> list[str]:
+        temp_ls = []
         with self._lock:
-            return self.states.get(
-                self.installed_plugins_key,
-                []
-            )
+            for plugin_id in list(self.states.keys()):
+                if self.states[plugin_id].get("installed") is True:
+                    temp_ls.append(plugin_id)
+        return temp_ls
