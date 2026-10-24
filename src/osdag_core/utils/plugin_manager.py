@@ -40,6 +40,7 @@ class PluginMetaData:
     download_size: int = field(init=False)
     online_ver: str = field(init=False)
     conda_channel: str = field(init=False)
+    extra_channel_deps: list[str] = field(init=False)
     is_installed: bool = field(init=False)
 
     def __post_init__(self):
@@ -49,6 +50,9 @@ class PluginMetaData:
                 f"{self.name}:{self.version}"
             )
         )
+        if self.is_dev:
+            self.is_installed = False
+            
         if self.plugin_class is not None:
             plugin_package, class_name = self.plugin_class.split(":", 1)
             plugin_module = importlib.import_module(plugin_package)
@@ -93,8 +97,8 @@ class PluginManager:
         self._load_entry_point_plugins()
         self._load_dev_plugins()
 
-        for plugin in self.plugins:
-            plugin.status = self.state_manager.get_status(plugin)
+        # for plugin in self.plugins:
+        #     plugin.status = self.state_manager.get_active_status(plugin.id)
 
         return self.plugins
 
@@ -136,12 +140,18 @@ class PluginManager:
 
                 # Create metadata
                 plugin = PluginMetaData(**meta)
-                if not self.state_manager.is_registered(plugin):
+                if not self.state_manager.is_registered(plugin.id):
                     plugin.status = True  # Mark as active if not registered
-                    self.state_manager.update_state(plugin, plugin.status) 
+                    self.state_manager.update_state(plugin, plugin.status)
                     self.state_manager.add_installed_plugin(plugin) # Register the plugin as installed
+                    # plugin.is_installed = True  # Mark as installed
+                    # self.state_manager.register_plugin(plugin) # Register the plugin as installed
                 else:
                     plugin.status = self.state_manager.get_status(plugin)
+                    # plugin = PluginMetaData(**self.state_manager.get_state(plugin))  # Load the plugin state from the state manager
+                    # plugin.status = self.state_manager.get_active_status(plugin.id)
+                    # plugin.is_installed = self.state_manager.get_installed_status(plugin.id)
+
                 self.plugins.append(plugin)
 
         except Exception as e:
@@ -199,7 +209,11 @@ class PluginManager:
                     continue
 
                 meta = getattr(module, "META", None)
-
+                if not meta:
+                    print(
+                        f"[WARN] Installed plugin '{package_name}' is missing META data."
+                    )
+                    continue
                 if not isinstance(meta, dict):
                     print(
                         f"[WARN] '{package_name}' has invalid META."
@@ -225,6 +239,7 @@ class PluginManager:
                         f"'module_tree' in META."
                     )
                     continue
+
                 if not meta.get("is_dev"):
                     meta["is_dev"] = True  # Mark as development plugin
                     
@@ -232,6 +247,15 @@ class PluginManager:
                 plugin = PluginMetaData(**meta)
                 plugin.status = self.state_manager.get_status(plugin)
                 self.state_manager.update_state(plugin, plugin.status)
+                # if not self.state_manager.is_registered(plugin.id):
+                #     plugin.status = True  # Mark as active if not registered
+                #     plugin.is_installed = False  # Mark as not installed
+                #     self.state_manager.register_plugin(plugin) # Register the plugin as installed
+                # else:
+                #     plugin = PluginMetaData(**self.state_manager.get_state(plugin))  # Load the plugin state from the state manager
+                #     # plugin.status = self.state_manager.get_active_status(plugin.id)
+                #     # plugin.is_installed = self.state_manager.get_installed_status(plugin.id)
+
                 self.plugins.append(plugin)
 
             except Exception as e:
@@ -239,26 +263,6 @@ class PluginManager:
                     f"[WARN] Could not load development plugin "
                     f"'{package_name}': {e}"
                 )
-        
-    # def discover_online_plugins(self, channel: str) -> list[PluginMetaData]:
-    #     """Discover available plugins from conda channel (metadata only).
-    #     After downloading, plugins will be loaded via entry points."""
-    #     urls = [f"https://conda.anaconda.org/{channel}/label/main/noarch/repodata.json",f"https://conda.anaconda.org/{channel}/label/main/win-64/repodata.json",f"https://conda.anaconda.org/{channel}/label/main/linux-64/repodata.json"]
-    #     pkgs = self._fetch_channel_pkgs(urls=urls)
-    #     online_plugins = []
-    #     for pkg_filename, info in pkgs.items():
-    #         meta = {
-    #             "name": info.get("name", ""),
-    #             "description": info.get("summary", "No description available."),
-    #             "authors": [info.get("author", "Unknown")],
-    #             "version": info.get("version", "1.0.0"),
-    #             "plugin_class": None,  # Will be loaded after download
-    #             "module_tree": None,  # Will be loaded after download
-    #         }
-    #         # Online plugins are returned as available for download only
-    #         # After download, they will be loaded via _load_entry_point_plugins()
-    #         online_plugins.append(PluginMetaData(**meta))
-    #     return online_plugins
 
     def discover_online_plugins(
         self,
@@ -470,13 +474,13 @@ class PluginManager:
         print(f"[INFO] Activating plugin: {plugin.name}")
         if plugin:
             plugin.status = True
-            self.state_manager.update_state(plugin, plugin.status)
+            self.state_manager.set_active_status(plugin.id, plugin.status)
 
     def deactivate(self, plugin: PluginMetaData):
         print(f"[INFO] Deactivating plugin: {plugin.name}")
         if plugin:
             plugin.status = False
-            self.state_manager.update_state(plugin, plugin.status)
+            self.state_manager.set_active_status(plugin.id, plugin.status)
 
     def download_plugin(self, plugin: PluginMetaData) -> bool:
         print(f"[INFO] Downloading plugin: {plugin.name}")
@@ -499,6 +503,11 @@ class PluginManager:
         # print(result.stdout)
         # print(result.stderr)
         if result.returncode == 0:
+            if not self.state_manager.is_registered(plugin.id):
+                plugin.status = True
+                plugin.is_installed = True
+                self.state_manager.register_plugin(plugin)
+
             # self.plugins.append(plugin)
             # After download, reload entry point plugins to load the newly installed plugin
             self._load_entry_point_plugins()
@@ -545,10 +554,18 @@ class PluginManager:
             "-c", "conda-forge",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
-        # print(result.stdout)
-        # print(result.stderr)
+
         if result.returncode == 0:
+            self.state_manager.delete_state(plugin)  # Remove old state
+
+            plugin.status = True
+            plugin.is_installed = True
+            plugin.version = plugin.online_ver  # Update to the new version
+            plugin = PluginMetaData(**plugin.__dict__)  # Recreate the plugin metadata
+            self.state_manager.register_installed_plugin(plugin) # Register the updated plugin
             return True
+        else:
+            print(f"[ERROR] Failed to update plugin '{plugin.name}'\n``: {result.stderr}")
         return False
 
     def get_plugin(self, plugin_id: str) -> PluginMetaData | None:
@@ -567,13 +584,13 @@ class PluginManager:
     # Installed Plugin Registration
     # ---------------------------
     def register_installed_plugin(self, plugin: PluginMetaData) -> None:
-        self.state_manager.add_installed_plugin(plugin)
+        self.state_manager.register_plugin(plugin)
 
     def unregister_installed_plugin(self, plugin: PluginMetaData) -> None:
-        self.state_manager.remove_installed_plugin(plugin)
+        self.state_manager.unregister_plugin(plugin.id)
 
     def is_registered(self, plugin: PluginMetaData) -> bool:
-        return self.state_manager.is_registered(plugin)
+        return self.state_manager.is_registered(plugin.id)
 
     def get_installed_plugins(self) -> list[PluginMetaData]:
         return [
@@ -593,7 +610,6 @@ class StateManager:
             with open(self.state_file, 'w', encoding='utf-8') as f:
                 json.dump({}, f, indent=4)
         self.plugins_paths_key = "__plugins_paths__"
-        self.installed_plugins_key = "__installed_plugins__"
         self._lock = RLock()
         self.states: dict = self._load_states()
         self._dirty = False
@@ -610,36 +626,73 @@ class StateManager:
                     f"[WARN] Could not load plugin state file {self.state_file}: {e}")
                 return {}
 
-    def get_status(self, plugin: PluginMetaData) -> bool:
+    def register_plugin(self, plugin: PluginMetaData) -> None:
         with self._lock:
-            state = self.states.get(plugin.id, {})
-            return state["activated"] if "activated" in state else False
-        
-    def get_installed(self, plugin: PluginMetaData) -> bool:
-        with self._lock:
-            state = self.states.get(plugin.id, {})
-            return state["installed"] if "installed" in state else False
-    
-    def get_state(self, plugin: PluginMetaData) -> dict:
-        with self._lock:
-            return self.states.get(plugin.id, {}).copy() if plugin.id in self.states else {}
-        
-    def update_state(self, plugin: PluginMetaData) -> None:
-        with self._lock:
-            plugin_id = plugin.id
-            new_state = {
-                "activated": plugin.status,
-                "installed": plugin.is_installed,
-            }
-            if self.states[plugin_id] != new_state:
-                self.states[plugin_id] = new_state
+            if not self.is_registered(plugin.id):
+                self.states[plugin.id] = plugin.__dict__
                 self._dirty = True
+                self.flush()
 
-    def delete_state(self, plugin: PluginMetaData) -> None:
+    def unregister_plugin(self, plugin_id: str) -> None:
         with self._lock:
-            if plugin.id in self.states:
-                del self.states[plugin.id]
+            if self.is_registered(plugin_id):
+                del self.states[plugin_id]
                 self._dirty = True
+                self.flush()
+
+    def is_registered(self, plugin_id: str) -> bool:
+        with self._lock:
+            state = self.states.get(plugin_id, {})
+            return state != {}
+        
+    def get_active_status(self, plugin_id: str) -> bool:
+        with self._lock:
+            if not self.is_registered(plugin_id):
+                return False
+            state = self.states.get(plugin_id, {})
+            return state["status"]
+            
+    def set_active_status(self, plugin_id: str, status: bool) -> None:
+        with self._lock:
+            if self.is_registered(plugin_id):
+                self.states[plugin_id]["status"] = status
+                self._dirty = True
+                self.flush()
+
+    def get_installed_status(self, plugin_id: str) -> bool:
+        with self._lock:
+            if not self.is_registered(plugin_id):
+                return False
+            state = self.states.get(plugin_id, {})
+            return state["is_installed"]
+        
+    def set_installed_status(self,  plugin_id: str, is_installed: bool) -> None:
+        with self._lock:
+            if self.is_registered(plugin_id):
+                self.states[plugin_id]["is_installed"] = is_installed
+                self._dirty = True
+                self.flush()
+
+    def get_state(self, plugin_id: str) -> dict:
+        with self._lock:
+            if not self.is_registered(plugin_id):
+                return {}
+            return self.states.get(plugin_id, {}).copy() if plugin_id in self.states else {}
+
+    def set_state(self, plugin: PluginMetaData) -> None:
+        with self._lock:
+            if not self.is_registered(plugin.id):
+                self.register_plugin(plugin)
+            self.states[plugin.id] = plugin.__dict__
+            self._dirty = True
+            self.flush()
+
+    def delete_state(self, plugin_id: str) -> None:
+        with self._lock:
+            if plugin_id in self.states:
+                del self.states[plugin_id]
+                self._dirty = True
+                self.flush()
 
     def flush(self):
         with self._lock:
@@ -647,11 +700,11 @@ class StateManager:
                 return
             try:    
                 self._atomic_save(self.states)
+                self.states = self._load_states() # Reload states after saving to ensure consistency
+                self._dirty = False
             except RuntimeError as e:
                 print(
                     f"[ERROR] Failed to save plugin state file {self.state_file}: {e}")
-                return
-            self._dirty = False
 
     def _atomic_save(self, data: dict) -> None:
         temp_name = None
@@ -702,6 +755,7 @@ class StateManager:
             if path not in paths:
                 paths.append(path)
                 self._dirty = True
+                self.flush()
                 
     def remove_plugin_path(self, path: str | Path) -> None:
         with self._lock:
@@ -715,44 +769,14 @@ class StateManager:
             if path in paths:
                 paths.remove(path)
                 self._dirty = True
-
-    # Installed Plugins
-    def add_installed_plugin(self, plugin: PluginMetaData) -> None:
-        with self._lock:
-            installed_plugins = self.states.setdefault(
-                self.installed_plugins_key,
-                []
-            )
-            if plugin.name not in installed_plugins:
-                installed_plugins.append(plugin.name)
-            self._dirty = True
-            self.flush()
-
-    def remove_installed_plugin(self, plugin: PluginMetaData) -> None:
-        with self._lock:
-            installed_plugins = self.states.get(
-                self.installed_plugins_key,
-                []
-            )
-            if plugin.name in installed_plugins:
-                installed_plugins.remove(plugin.name)
-            self.states.remove(plugin.id)  # Remove the plugin's status as well
-            self._dirty = True
-            self.flush()
-
-
-    def is_registered(self, plugin: PluginMetaData) -> bool:
-        with self._lock:
-            installed_plugins = self.states.get(
-                self.installed_plugins_key,
-                []
-            )
-            return plugin.name in installed_plugins
-
-    def get_installed_plugins(self) -> list[str]:
+                self.flush()
+                
+    # Installed Plugins        
+    def get_installed_plugins(self) -> list[PluginMetaData]:
         temp_ls = []
         with self._lock:
             for plugin_id in list(self.states.keys()):
-                if self.states[plugin_id].get("installed") is True:
-                    temp_ls.append(plugin_id)
+                state = self.states[plugin_id]
+                if state["is_installed"] is True:
+                    temp_ls.append(PluginMetaData(**self.states[plugin_id]))
         return temp_ls

@@ -274,8 +274,7 @@ class PluginStoreDialog(QDialog):
         self.channel = "zehen-249"
         self.plugins: list[PluginMetaData] = self.plugin_manager.discover_online_plugins(
             channel=self.channel)
-        self.local_plugins: list[PluginMetaData] = self.plugin_manager.discover_local_plugins(
-        )
+        self.local_plugins: list[PluginMetaData] = self.state_manager.get_installed_plugins()
         self.updates_available = self._check_for_updates()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -648,7 +647,7 @@ class PluginStoreDialog(QDialog):
                     for up in self.updates_available
                 )
 
-                if self.plugin_manager.is_registered(plugin):
+                if self.plugin_manager.is_registered(plugin.id):
                     pw.set_state("installed")
 
                 if is_update_available:
