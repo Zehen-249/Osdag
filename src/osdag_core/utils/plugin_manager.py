@@ -24,87 +24,162 @@ from osdag_gui.plugin.widget_plugin import WidgetPlugin
 
 @dataclass
 class PluginMetaData:
-    id: str = field(init=False)
-    name: str
-    plugin_type: Type[WindowPlugin] | Type[WidgetPlugin] = field(init=False)
+    id: str = field(default_factory=lambda: "")
+    name: str = field(default_factory=lambda: "Unnamed Plugin")
     description: str = field(
         default_factory=lambda: "No description available.")
     authors: list[str] = field(default_factory=lambda: ["Unknown"])
     version: str = field(default_factory=lambda: "1.0.0")
     status: bool = field(default_factory=lambda: False)
-    plugin_class: Type[WindowPlugin] | Type[WidgetPlugin] = field(default_factory=lambda: None)
+    plugin_class: str | Type[WindowPlugin] | Type[WidgetPlugin] | None = field(default_factory=lambda: None)
     module_tree: list[tuple] | dict[str,list[tuple]] = field(default_factory=lambda: [("", "", None)])
     icons: list[str] = field(default_factory=lambda: [":/images/add_ons.png", ":/images/add_ons_clicked.png"])
+    conda_channel: str = field(default_factory=lambda: "")
+    extra_channel_deps: list[str] = field(default_factory=list)
     is_dev: bool = field(default_factory=lambda: False)
-    online_avl: bool = field(init=False)
-    download_size: int = field(init=False)
-    online_ver: str = field(init=False)
-    conda_channel: str = field(init=False)
-    extra_channel_deps: list[str] = field(init=False)
-    is_installed: bool = field(init=False)
+
+    plugin_type: Type[WindowPlugin] | Type[WidgetPlugin] = field(default_factory=lambda: None)
+    dev_path: str | None = field(default_factory=lambda: None)
+    online_avl: bool = field(default_factory=lambda: False)
+    download_size: int = field(default_factory=lambda: 0)
+    online_ver: str = field(default_factory=lambda: "")
+    update_avl: bool = field(default_factory=lambda: False)
+    is_installed: bool = field(default_factory=lambda: False)
+
 
     def __post_init__(self):
+        if self.is_dev:
+            self.is_installed = False
+            self.name = f"{self.name} (dev)" if not self.name.endswith("(dev)") else self.name
+
+        if self.is_installed:
+            self.is_dev = False
+
         self.id = str(
             uuid.uuid5(
                 uuid.NAMESPACE_DNS,
                 f"{self.name}:{self.version}"
             )
         )
-        if self.is_dev:
-            self.is_installed = False
             
         if self.plugin_class is not None:
-            plugin_package, class_name = self.plugin_class.split(":", 1)
-            plugin_module = importlib.import_module(plugin_package)
-            resolved_class = getattr(plugin_module, class_name)
-            if resolved_class is None:
-                raise AttributeError(
-                    f"Plugin '{self.name}': class '{class_name}' "
-                    f"was not found in module '{plugin_module}'."
-                )
-            if not issubclass(resolved_class, PluginBase):
+            # Resolve plugin class if provided as an import string
+            if isinstance(self.plugin_class, str):
+                plugin_package, class_name = self.plugin_class.split(":", 1)
+                plugin_module = importlib.import_module(plugin_package)
+                resolved_class = getattr(plugin_module, class_name, None)
+
+                if resolved_class is None:
+                    raise AttributeError(
+                        f"Plugin '{self.name}': class '{class_name}' "
+                        f"was not found in module '{plugin_package}'."
+                    )
+
+                self.plugin_class = resolved_class
+
+            # Validate resolved plugin class
+            if not isinstance(self.plugin_class, type):
                 raise TypeError(
-                    f"Plugin '{self.name}': '{plugin_module}:{class_name}' "
-                    f"resolved to {resolved_class!r}, "
-                    f"which is not a subclass of PluginBase."
+                    f"Plugin '{self.name}': plugin_class must be a "
+                    f"class or import-path string, got {type(self.plugin_class).__name__}."
                 )
-            self.plugin_class = resolved_class
+
+            if not issubclass(self.plugin_class, PluginBase):
+                raise TypeError(
+                    f"Plugin '{self.name}': '{self.plugin_class}' "
+                    f"is not a subclass of PluginBase."
+                )
+
+            # Determine plugin type
             if issubclass(self.plugin_class, WindowPlugin):
                 self.plugin_type = WindowPlugin
+
             elif issubclass(self.plugin_class, WidgetPlugin):
                 self.plugin_type = WidgetPlugin
+
             else:
                 raise TypeError(
                     f"Plugin '{self.name}': '{self.plugin_class}' "
                     f"is not a subclass of WindowPlugin or WidgetPlugin."
                 )
+
         else:
             self.plugin_type = None
-        
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "plugin_type": (
+                f"{self.plugin_type.__module__}:{self.plugin_type.__qualname__}"
+                if self.plugin_type else None
+            ),
+            "description": self.description,
+            "authors": self.authors,
+            "version": self.version,
+            "status": self.status,
+            "plugin_class": (
+                f"{self.plugin_class.__module__}:{self.plugin_class.__qualname__}"
+                if isinstance(self.plugin_class, type)
+                else self.plugin_class
+            ),
+            "module_tree": self.module_tree,
+            "icons": self.icons,
+            "is_dev": self.is_dev,
+            "dev_path": self.dev_path,
+            "online_avl": self.online_avl,
+            "download_size": self.download_size,
+            "online_ver": self.online_ver,
+            "conda_channel": self.conda_channel,
+            "extra_channel_deps": self.extra_channel_deps,
+            "is_installed": self.is_installed,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        data = data.copy()
+        for key in ("plugin_class", "plugin_type"):
+            value = data.get(key)
+
+            if isinstance(value, str) and ":" in value:
+                module_path, class_name = value.split(":", 1)
+                module = importlib.import_module(module_path)
+                data[key] = getattr(module, class_name)
+
+        # Restore tuples in module_tree
+        if isinstance(data.get("module_tree"), list):
+            data["module_tree"] = [
+                tuple(item) if isinstance(item, list) else item
+                for item in data["module_tree"]
+            ]
+        return cls(**data)
+
 class PluginManager:
     def __init__(self):
         self.state_manager = StateManager()
-        self.plugins: list[PluginMetaData] = []
-        self.dev_plugins_paths: list[Path] = self.state_manager.get_plugin_paths()
+        self.local_plugins: list[PluginMetaData] = []
+        self.online_plugins: list[PluginMetaData] = []
+        self.dev_plugins_paths: list[Path] = self.get_dev_plugin_paths()
         self.plugins_entry_point = metadata.entry_points().select(group="osdag.plugins")
         
     # ---------------------------
     # Plugin Discovery (Local Under Development & Installed Plugins)
     # ---------------------------
     def discover_local_plugins(self) -> list[PluginMetaData]:
-        self.plugins.clear()
+        self.local_plugins.clear()
 
-        self._load_entry_point_plugins()
-        self._load_dev_plugins()
-
-        # for plugin in self.plugins:
+        # self._load_entry_point_plugins()
+        # self._load_dev_plugins()
+        self.local_plugins = self.get_installed_plugins() + self.get_dev_plugins()
+        # for plugin in self.local_plugins:
         #     plugin.status = self.state_manager.get_active_status(plugin.id)
 
-        return self.plugins
+        return self.local_plugins
 
-    def _load_entry_point_plugins(self) -> None:
+    def _load_entry_point_plugins(self) -> PluginMetaData | None:
         try:
             for ep in self.plugins_entry_point:
+
                 module = ep.load()
                 if not getattr(module, "IS_OSDAG_PLUGIN", False):
                     print(
@@ -140,28 +215,22 @@ class PluginManager:
 
                 # Create metadata
                 plugin = PluginMetaData(**meta)
-                if not self.state_manager.is_registered(plugin.id):
-                    plugin.status = True  # Mark as active if not registered
-                    self.state_manager.update_state(plugin, plugin.status)
-                    self.state_manager.add_installed_plugin(plugin) # Register the plugin as installed
-                    # plugin.is_installed = True  # Mark as installed
-                    # self.state_manager.register_plugin(plugin) # Register the plugin as installed
+                plugin.is_installed = True  # Mark as installed plugin
+                if not self.is_registered(plugin):
+                    self.register_installed_plugin(plugin)  # Register the plugin as installed
                 else:
-                    plugin.status = self.state_manager.get_status(plugin)
-                    # plugin = PluginMetaData(**self.state_manager.get_state(plugin))  # Load the plugin state from the state manager
-                    # plugin.status = self.state_manager.get_active_status(plugin.id)
-                    # plugin.is_installed = self.state_manager.get_installed_status(plugin.id)
+                    plugin = self.get_plugin_state(plugin)  # Load the plugin state from the state manager
 
-                self.plugins.append(plugin)
+                self.local_plugins.append(plugin)
 
         except Exception as e:
             print(f"[WARN] Installed plugin loading failed: {e}")
 
 
     def _load_dev_plugins(self) -> None:
+
         for plugin_path in self.dev_plugins_paths:
             plugin_path = Path(plugin_path).resolve()
-            print(f"[INFO] Loading development plugin from path: {plugin_path}")
 
             # Check folder
             if not plugin_path.exists():
@@ -243,20 +312,17 @@ class PluginManager:
                 if not meta.get("is_dev"):
                     meta["is_dev"] = True  # Mark as development plugin
                     
+                meta["dev_path"] = str(plugin_path)  # Store the development path
+                    
                 # Create metadata
                 plugin = PluginMetaData(**meta)
-                plugin.status = self.state_manager.get_status(plugin)
-                self.state_manager.update_state(plugin, plugin.status)
-                # if not self.state_manager.is_registered(plugin.id):
-                #     plugin.status = True  # Mark as active if not registered
-                #     plugin.is_installed = False  # Mark as not installed
-                #     self.state_manager.register_plugin(plugin) # Register the plugin as installed
-                # else:
-                #     plugin = PluginMetaData(**self.state_manager.get_state(plugin))  # Load the plugin state from the state manager
-                #     # plugin.status = self.state_manager.get_active_status(plugin.id)
-                #     # plugin.is_installed = self.state_manager.get_installed_status(plugin.id)
+                if not self.is_registered(plugin):
+                    self.register_dev_plugin(plugin)  # Register development plugin
 
-                self.plugins.append(plugin)
+                else:
+                    plugin = self.get_plugin_state(plugin)  # Load the plugin state from the state manager
+
+                self.local_plugins.append(plugin)
 
             except Exception as e:
                 print(
@@ -309,10 +375,6 @@ class PluginManager:
             print(f"[WARN] Unsupported platform: {system} / {machine}")
             return []
 
-        print(
-            f"[INFO] Discovering online plugins for "
-            f"{system} / {machine} ({platform_subdir})"
-        )
 
         # ---------------------------------------------------------
         # Build repository URLs
@@ -452,9 +514,22 @@ class PluginManager:
                 "1.0.0"
             )
             plugin.conda_channel = channel
+            plugin.extra_channel_deps = info.get("extra_channel_deps", [])
             online_plugins.append(plugin)
 
-        return online_plugins
+        self.online_plugins = online_plugins
+
+        # for inst, online in zip(self.local_plugins, self.online_plugins):
+        #     if inst.name == online.name and (Version(inst.version) < Version(online.online_ver) and inst.online_avl == False):
+        #         inst.online_avl = True
+        #         inst.download_size = online.download_size
+        #         inst.online_ver = online.online_ver
+        #         inst.conda_channel = online.conda_channel
+        #         inst.extra_channel_deps = online.extra_channel_deps
+        #         if Version(inst.version) < Version(online.online_ver):
+        #             inst.update_avl = True
+    
+        return self.online_plugins
 
     def _fetch_url_pkgs(self, url: str):
         """Fetch and parse repodata.json from a conda channel and return packages."""
@@ -471,19 +546,17 @@ class PluginManager:
     # State Management
     # ---------------------------
     def activate(self, plugin: PluginMetaData):
-        print(f"[INFO] Activating plugin: {plugin.name}")
         if plugin:
             plugin.status = True
-            self.state_manager.set_active_status(plugin.id, plugin.status)
+            self.set_active_status(plugin)
 
     def deactivate(self, plugin: PluginMetaData):
-        print(f"[INFO] Deactivating plugin: {plugin.name}")
         if plugin:
             plugin.status = False
-            self.state_manager.set_active_status(plugin.id, plugin.status)
+            self.set_active_status(plugin)
 
-    def download_plugin(self, plugin: PluginMetaData) -> bool:
-        print(f"[INFO] Downloading plugin: {plugin.name}")
+    def download_plugin(self, store_plugin: PluginMetaData) -> bool:
+        print(f"[INFO] Downloading plugin: {store_plugin.name}")
 
         if not hasattr(self, 'conda_exe'):
             self.conda_exe = os.environ["CONDA_EXE"]
@@ -492,27 +565,30 @@ class PluginManager:
             self.conda_exe,
             "install",
             "--prefix", os.environ["CONDA_PREFIX"],
-            f"{plugin.conda_channel}::{plugin.name}",
+            f"{store_plugin.conda_channel}::{store_plugin.name}",
             "-y",
+            "-c", store_plugin.conda_channel,
             "-c", "osdag",
-            "-c", "zehen-249",
+            "-c", "osdag-plugins",
             "-c", "geompy",
             "-c", "conda-forge",
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        # print(result.stdout)
-        # print(result.stderr)
-        if result.returncode == 0:
-            if not self.state_manager.is_registered(plugin.id):
-                plugin.status = True
-                plugin.is_installed = True
-                self.state_manager.register_plugin(plugin)
+        # Add extra channels, if available
+        for dep in getattr(store_plugin, "extra_channel_deps", []):
+            cmd.extend(["-c", dep])
 
-            # self.plugins.append(plugin)
-            # After download, reload entry point plugins to load the newly installed plugin
-            self._load_entry_point_plugins()
-            return True
-        return False
+        result = subprocess.run(
+            cmd, 
+            capture_output=True, 
+            text=True)
+        
+        if result.returncode != 0:
+            error = result.stderr.strip() or result.stdout.strip()
+            print(f"[ERROR] Download failed:\n{error}")
+            return False, error
+        
+        print(f"[INFO] Successfully downloaded: {store_plugin.name}")
+        return True, ""
 
     def delete_plugin(self, plugin: PluginMetaData) -> bool:
         print(f"[INFO] Deleting plugin: {plugin.name}")
@@ -531,13 +607,13 @@ class PluginManager:
         # print(result.stdout)
         # print(result.stderr)
         if result.returncode == 0:
-            self.plugins = [p for p in self.plugins if p.id != plugin.id]
-            self.state_manager.delete_state(plugin)
-            return True
-        return False
+            self.local_plugins = [p for p in self.local_plugins if p.id != plugin.id]
+            self.unregister_installed_plugin(plugin.id)
+            return True , ""
+        return False, result.stderr.strip() or result.stdout.strip()
 
-    def update_plugin(self, plugin: PluginMetaData) -> bool:
-        print(f"[INFO] Updating plugin: {plugin.name}")
+    def update_plugin(self, store_plugin: PluginMetaData) -> bool:
+        print(f"[INFO] Updating plugin: {store_plugin.name}")
 
         if not hasattr(self, 'conda_exe'):
             self.conda_exe = os.environ["CONDA_EXE"]
@@ -546,44 +622,49 @@ class PluginManager:
             self.conda_exe,
             "update",
             "--prefix", os.environ["CONDA_PREFIX"],
-            f"{plugin.conda_channel}::{plugin.name}",
+            f"{store_plugin.name}",
             "-y",
+            "-c", store_plugin.conda_channel,
             "-c", "osdag",
-            "-c", "zehen-249",
+            "-c", "osdag-plugins",
             "-c", "geompy",
             "-c", "conda-forge",
-        ]
+        ] 
+        # Add extra channels, if available
+        for dep in getattr(store_plugin, "extra_channel_deps", []):
+            cmd.extend(["-c", dep])
+
         result = subprocess.run(cmd, capture_output=True, text=True)
-
         if result.returncode == 0:
-            self.state_manager.delete_state(plugin)  # Remove old state
-
-            plugin.status = True
-            plugin.is_installed = True
-            plugin.version = plugin.online_ver  # Update to the new version
-            plugin = PluginMetaData(**plugin.__dict__)  # Recreate the plugin metadata
-            self.state_manager.register_installed_plugin(plugin) # Register the updated plugin
-            return True
+            return True, ""
         else:
-            print(f"[ERROR] Failed to update plugin '{plugin.name}'\n``: {result.stderr}")
-        return False
+            print(f"[ERROR] Failed to update plugin '{store_plugin.name}'\n``: {result.stderr}")
+        return False, result.stderr.strip() or result.stdout.strip()
+
+    def set_active_status(self, plugin: PluginMetaData) -> None:
+        self.state_manager.set_active_status(plugin.id, plugin.status)
 
     def get_plugin(self, plugin_id: str) -> PluginMetaData | None:
-        for p in self.plugins:
+        for p in self.local_plugins:
             if p.id == plugin_id:
                 return p
         return None
 
     def get_plugin_by_name(self, plugin_name: str) -> PluginMetaData | None:
-        for p in self.plugins:
+        for p in self.local_plugins:
             if p.name.strip().lower() == plugin_name.strip().lower():
                 return p
         return None
+
+    def get_plugin_state(self, plugin_id: str) -> PluginMetaData | None:
+        return self.state_manager.get_state(plugin_id)
 
     # ---------------------------
     # Installed Plugin Registration
     # ---------------------------
     def register_installed_plugin(self, plugin: PluginMetaData) -> None:
+        plugin.status = True
+        plugin.is_installed = True
         self.state_manager.register_plugin(plugin)
 
     def unregister_installed_plugin(self, plugin: PluginMetaData) -> None:
@@ -592,12 +673,46 @@ class PluginManager:
     def is_registered(self, plugin: PluginMetaData) -> bool:
         return self.state_manager.is_registered(plugin.id)
 
+    def update_installed_plugin_state(self, plugin: PluginMetaData) -> None:
+        plugin = PluginMetaData(**plugin.to_dict())  # Recreate the plugin metadata
+        self.state_manager.set_state(plugin)
+
     def get_installed_plugins(self) -> list[PluginMetaData]:
-        return [
-            self.get_plugin_by_name(x)
-            for x in self.state_manager.get_installed_plugins()
-        ]
+        return self.state_manager.get_installed_plugins()
     
+    # ---------------------------
+    # Development Plugin Registration
+    # ---------------------------
+    def get_dev_plugin_paths(self) -> list[Path]:
+        return self.state_manager.get_plugin_paths()
+
+    def get_dev_plugin_by_path(self, path: str | Path) -> PluginMetaData | None:
+        return self.state_manager.get_plugin_by_dev_path(path)
+    
+    def register_dev_plugin_path(self, path: str | Path) -> None:
+        self.state_manager.add_plugin_path(path)
+        self.dev_plugins_paths = self.get_dev_plugin_paths()  # Update the local list
+
+    def register_dev_plugin(self, plugin: PluginMetaData) -> None:
+        plugin.status = True
+        plugin.is_dev = True
+        plugin = PluginMetaData(**plugin.to_dict())  # Recreate the plugin metadata
+        self.state_manager.register_plugin(plugin)
+
+    def unregister_dev_plugin_path(self, path: str | Path) -> None:
+        self.state_manager.remove_plugin_path(path)
+        self.dev_plugins_paths = self.get_dev_plugin_paths()  # Update the local list
+
+    def is_dev_plugin_path_registered(self, path: str | Path) -> bool:
+        return Path(path).resolve() in self.dev_plugins_paths
+
+    def clear_dev_plugin_paths(self) -> None:
+        for path in self.dev_plugins_paths:
+            self.state_manager.remove_plugin_path(path)
+        self.dev_plugins_paths = self.get_dev_plugin_paths()  # Update the local list
+
+    def get_dev_plugins(self) -> list[PluginMetaData]:
+        return self.state_manager.get_dev_plugins()
 
 
 class StateManager:
@@ -611,100 +726,138 @@ class StateManager:
                 json.dump({}, f, indent=4)
         self.plugins_paths_key = "__plugins_paths__"
         self._lock = RLock()
-        self.states: dict = self._load_states()
+        self.states: dict[str:PluginMetaData] = self._load_states()
         self._dirty = False
 
     def _load_states(self):
         if not os.path.exists(self.state_file):
             return {}
+
         with self._lock:
             try:
-                with open(self.state_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                with open(self.state_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                # Load development plugin paths before importing plugin classes
+                dev_plugins_paths = data.get("__plugins_paths__", [])
+
+                for plugin_path in dev_plugins_paths:
+                    plugin_path = Path(plugin_path).resolve()
+
+                    if not plugin_path.is_dir():
+                        print(
+                            f"[WARN] Development plugin path does not exist: "
+                            f"{plugin_path}"
+                        )
+                        continue
+
+                    import_root = str(plugin_path.parent)
+
+                    if import_root not in sys.path:
+                        sys.path.insert(0, import_root)
+
+                # Deserialize plugin metadata
+                states = {
+                    "__plugins_paths__": dev_plugins_paths
+                }
+
+                for plugin_id, plugin_data in data.items():
+                    if plugin_id == "__plugins_paths__":
+                        continue
+
+                    if isinstance(plugin_data, dict):
+                        states[plugin_id] = PluginMetaData.from_dict(plugin_data)
+
+                return states
+
             except (json.JSONDecodeError, OSError) as e:
                 print(
-                    f"[WARN] Could not load plugin state file {self.state_file}: {e}")
+                    f"[WARN] Could not load plugin state file "
+                    f"{self.state_file}: {e}"
+                )
                 return {}
 
     def register_plugin(self, plugin: PluginMetaData) -> None:
         with self._lock:
             if not self.is_registered(plugin.id):
-                self.states[plugin.id] = plugin.__dict__
+                self.states[plugin.id] = plugin
                 self._dirty = True
-                self.flush()
+                self.flush()  # Save the state immediately after registration
 
     def unregister_plugin(self, plugin_id: str) -> None:
         with self._lock:
             if self.is_registered(plugin_id):
                 del self.states[plugin_id]
                 self._dirty = True
-                self.flush()
+                self.flush()  # Save the state immediately after registration
 
     def is_registered(self, plugin_id: str) -> bool:
         with self._lock:
-            state = self.states.get(plugin_id, {})
-            return state != {}
+            state = self.states.get(plugin_id, None)
+            return state is not None and isinstance(state, PluginMetaData)
         
     def get_active_status(self, plugin_id: str) -> bool:
-        with self._lock:
+        with self._lock:    
             if not self.is_registered(plugin_id):
                 return False
             state = self.states.get(plugin_id, {})
-            return state["status"]
+            return state.status if isinstance(state, PluginMetaData) else False
             
     def set_active_status(self, plugin_id: str, status: bool) -> None:
         with self._lock:
             if self.is_registered(plugin_id):
-                self.states[plugin_id]["status"] = status
+                self.states[plugin_id].status = status
                 self._dirty = True
-                self.flush()
+                self.flush()  # Save the state immediately after registration
 
     def get_installed_status(self, plugin_id: str) -> bool:
         with self._lock:
             if not self.is_registered(plugin_id):
                 return False
             state = self.states.get(plugin_id, {})
-            return state["is_installed"]
+            return state.is_installed if isinstance(state, PluginMetaData) else False
         
     def set_installed_status(self,  plugin_id: str, is_installed: bool) -> None:
         with self._lock:
             if self.is_registered(plugin_id):
-                self.states[plugin_id]["is_installed"] = is_installed
+                self.states[plugin_id].is_installed = is_installed
                 self._dirty = True
-                self.flush()
+                self.flush()  # Save the state immediately after registration
 
-    def get_state(self, plugin_id: str) -> dict:
+    def get_state(self, plugin_id: str) -> PluginMetaData | None:
         with self._lock:
             if not self.is_registered(plugin_id):
-                return {}
-            return self.states.get(plugin_id, {}).copy() if plugin_id in self.states else {}
+                return None
+            return self.states.get(plugin_id, None)
 
     def set_state(self, plugin: PluginMetaData) -> None:
         with self._lock:
             if not self.is_registered(plugin.id):
                 self.register_plugin(plugin)
-            self.states[plugin.id] = plugin.__dict__
+            self.states[plugin.id] = plugin
             self._dirty = True
-            self.flush()
-
-    def delete_state(self, plugin_id: str) -> None:
-        with self._lock:
-            if plugin_id in self.states:
-                del self.states[plugin_id]
-                self._dirty = True
-                self.flush()
+            self.flush()  # Save the state immediately after registration
 
     def flush(self):
         with self._lock:
             if not self._dirty:
                 return
             try:    
-                self._atomic_save(self.states)
+                serializable_states = {}
+                for key, plugin in self.states.items():
+                    if key == "__plugins_paths__":
+                        serializable_states[key] = plugin
+                    else:
+                        serializable_states[key] = plugin.to_dict()
+
+                self._atomic_save(serializable_states)
                 self.states = self._load_states() # Reload states after saving to ensure consistency
                 self._dirty = False
-            except RuntimeError as e:
-                print(
-                    f"[ERROR] Failed to save plugin state file {self.state_file}: {e}")
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to save plugin state file {self.state_file}: "
+                    f"{type(e).__name__}: {e}"
+                ) from e
 
     def _atomic_save(self, data: dict) -> None:
         temp_name = None
@@ -748,15 +901,16 @@ class StateManager:
         
     def add_plugin_path(self, path: str | Path) -> None:
         with self._lock:
-            paths = self.states.get(self.plugins_paths_key, [])
+            paths = self.states.get(self.plugins_paths_key)
+            if paths is None:
+                paths = []
+                self.states[self.plugins_paths_key] = paths
 
             path = str(Path(path).resolve())
-
             if path not in paths:
-                paths.append(path)
+                self.states[self.plugins_paths_key].append(path)
                 self._dirty = True
-                self.flush()
-                
+
     def remove_plugin_path(self, path: str | Path) -> None:
         with self._lock:
             paths = self.states.get(
@@ -767,16 +921,41 @@ class StateManager:
             path = str(Path(path).resolve())
 
             if path in paths:
-                paths.remove(path)
+                self.states[self.plugins_paths_key].remove(path)
+                plugin = self.get_plugin_by_dev_path(path)
+                if plugin:
+                    self.unregister_plugin(plugin.id)
                 self._dirty = True
-                self.flush()
+
+    def get_plugin_by_dev_path(self, path: str | Path) -> PluginMetaData | None:
+        with self._lock:
+            for plugin_id, state in self.states.items():
+                if plugin_id == self.plugins_paths_key:
+                    continue
+                if isinstance(state, PluginMetaData) and state.is_dev and state.dev_path == str(Path(path).resolve()):
+                    return state
+        return None
+    
+    def get_dev_plugins(self) -> list[PluginMetaData]:
+        dev_plugins = []
+        with self._lock:
+            for plugin_id in list(self.states.keys()):
+                if plugin_id == self.plugins_paths_key:
+                    continue
+                state = self.states[plugin_id]
+                if state.is_dev if hasattr(state, 'is_dev') else False:
+                    dev_plugins.append(state)
+        return dev_plugins
+
                 
     # Installed Plugins        
     def get_installed_plugins(self) -> list[PluginMetaData]:
         temp_ls = []
         with self._lock:
             for plugin_id in list(self.states.keys()):
+                if plugin_id == self.plugins_paths_key:
+                    continue
                 state = self.states[plugin_id]
-                if state["is_installed"] is True:
-                    temp_ls.append(PluginMetaData(**self.states[plugin_id]))
+                if state.is_installed if hasattr(state, 'is_installed') else False:
+                    temp_ls.append(state)
         return temp_ls

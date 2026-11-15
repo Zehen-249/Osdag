@@ -30,9 +30,10 @@ class PluginWidget(QWidget):
 
     def __init__(self, plugin: PluginMetaData, parent=None):
         super().__init__(parent)
+        self.plugin = plugin
+
         self.setObjectName("PluginWidget")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.plugin = plugin
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(6)
@@ -53,7 +54,6 @@ class PluginWidget(QWidget):
 
         self.name_label = QLabel(
             f"<b>{plugin.name.title()} v{plugin.version}</b>"
-            f"{' (Dev Plugin)' if plugin.is_dev else ''}"
         )
         self.name_label.setStyleSheet(
             "font-weight: bold; font-size: 12pt; color: #90AF13;")
@@ -202,13 +202,13 @@ class PluginWidget(QWidget):
 
     def _emit_activate(self):
         if not self.plugin.status:
-            self.plugin.status = not self.plugin.status
+            self.plugin.status = True
             self.set_status(self.plugin.status)
             self.activate.emit(self.plugin)
 
     def _emit_deactivate(self):
         if self.plugin.status:
-            self.plugin.status = not self.plugin.status
+            self.plugin.status = False
             self.set_status(self.plugin.status)
             self.deactivate.emit(self.plugin)
 
@@ -437,12 +437,13 @@ class PluginManagerDialog(QDialog):
             for plugin in self.plugins:
                 print(
                     f"    {plugin.name} by {', '.join(author for author in plugin.authors)}")
+                pw = self.create_plugin_widget(plugin)
                 if plugin.status:
                     print("     [INFO] Status: Active")
-                    self.activate_plugin(plugin)
+                    pw.activate.emit(plugin)
                 else:
                     print("     [INFO] Status: Inactive")
-                pw = self.create_plugin_widget(plugin)
+                    pw.deactivate.emit(plugin)
                 self.pluginLayout.addWidget(pw)
             print("\n=====================================\n")
 
@@ -498,8 +499,7 @@ class PluginManagerDialog(QDialog):
         mainLayout.addWidget(contentWidget)
 
     def activate_plugin(self, plugin: PluginMetaData):
-        plugin = self.plugin_manager.get_plugin(plugin.id)
-        if plugin and plugin.name not in self.active_plugins.keys():
+        if plugin and (plugin.name not in self.active_plugins.keys()):
             self.active_plugins[plugin.name] = plugin.module_tree
             self.data_modules.update({plugin.name: plugin.module_tree})
             self.data_navbar_icons.update({plugin.name: plugin.icons})
@@ -512,17 +512,18 @@ class PluginManagerDialog(QDialog):
 
     def open_store_dialog(self):
         # print("[PLUGIN STORE] Opening Plugin Store Dialog...")
-        store_dialog = PluginStoreDialog(parent=self)
-        store_dialog.show()
+        if not hasattr(self, 'store_dialog') or self.store_dialog is None:
+            self.store_dialog = PluginStoreDialog(parent=self)
+        self.store_dialog.show()
 
     def open_dev_paths_dialog(self):
+        if not hasattr(self, 'dev_paths_dialog') or self.dev_paths_dialog is None:
+            self.dev_paths_dialog = DevelopmentPluginPathsDialog(
+                self.plugin_manager,
+                self
+            )
+            self.dev_paths_dialog.refresh_plugins.connect(self.refresh_plugins)
 
-        self.dev_paths_dialog = DevelopmentPluginPathsDialog(
-            self.plugin_manager,
-            self
-        )
-
-        self.dev_paths_dialog.refresh_plugins.connect(self.refresh_plugins)
         self.dev_paths_dialog.show()
 
     def create_plugin_widget(self, plugin):
@@ -545,7 +546,7 @@ class PluginManagerDialog(QDialog):
         return pw
 
     def refresh_plugins(self):
-        self.plugin_manager.dev_plugins_paths = self.plugin_manager.state_manager.get_plugin_paths()
+        self.plugin_manager.dev_plugins_paths = self.plugin_manager.get_dev_plugin_paths()
         self.plugins = self.plugin_manager.discover_local_plugins()
         # Clear old plugin widgets
         for i in reversed(range(self.pluginLayout.count())):
@@ -557,6 +558,10 @@ class PluginManagerDialog(QDialog):
         if len(self.plugins) > 0:
             for plugin in self.plugins:
                 pw = self.create_plugin_widget(plugin)
+                if plugin.status:
+                    pw.activate.emit(plugin)
+                else:
+                    pw.deactivate.emit(plugin)
                 self.pluginLayout.addWidget(pw)
 
     def closeEvent(self, event):
@@ -571,10 +576,11 @@ class PluginManagerDialog(QDialog):
 class DevelopmentPluginPathsDialog(QDialog):
     refresh_plugins = Signal()
 
-    def __init__(self, plugin_manager, parent=None):
-        super().__init__(parent)
+    def __init__(self, plugin_manager, plugin_manager_dialog):
+        super().__init__(plugin_manager_dialog)
 
         self.plugin_manager = plugin_manager
+        self.plugin_manager_dialog = plugin_manager_dialog
 
         # --------------------------------------------------
         # Window
@@ -736,7 +742,7 @@ class DevelopmentPluginPathsDialog(QDialog):
 
         self.add_button.clicked.connect(self.add_repository)
         self.remove_button.clicked.connect(self.remove_repository)
-        self.close_button.clicked.connect(self.accept)
+        self.close_button.clicked.connect(self.close)
 
         self.refresh_paths()
 
@@ -744,7 +750,7 @@ class DevelopmentPluginPathsDialog(QDialog):
 
         self.path_list.clear()
 
-        paths = self.plugin_manager.state_manager.get_plugin_paths()
+        paths = self.plugin_manager.get_dev_plugin_paths()
 
         for path in paths:
             text = str(path)
@@ -752,7 +758,6 @@ class DevelopmentPluginPathsDialog(QDialog):
             self.path_list.addItem(text)
 
     def add_repository(self):
-
         directory = QFileDialog.getExistingDirectory(
             self,
             "Select Development Plugin Repository"
@@ -760,11 +765,11 @@ class DevelopmentPluginPathsDialog(QDialog):
 
         if not directory:
             return
-
-        self.plugin_manager.state_manager.add_plugin_path(
+        self.plugin_manager.register_dev_plugin_path(
             directory
         )
         self.refresh_paths()
+        self.plugin_manager._load_dev_plugins()
         self.refresh_plugins.emit()
 
     def remove_repository(self):
@@ -792,18 +797,26 @@ class DevelopmentPluginPathsDialog(QDialog):
         if reply != QMessageBox.Yes:
             return
 
-        self.plugin_manager.state_manager.remove_plugin_path(
+        plugin = self.plugin_manager.get_dev_plugin_by_path(path)
+        if plugin:
+            if plugin.status:
+                self.plugin_manager_dialog.deactivate_plugin(plugin)
+                self.plugin_manager.deactivate(plugin)
+
+        self.plugin_manager.unregister_dev_plugin_path(
             path
         )
-
+        
         self.refresh_paths()
         self.refresh_plugins.emit()
 
     def closeEvent(self, event):
-
         self.plugin_manager.state_manager.flush()
-
         super().closeEvent(event)
+
+    def okClicked(self):
+        self.plugin_manager.state_manager.flush()
+        self.accept()
 
 # # Test the dialog
 # if __name__ == "__main__":

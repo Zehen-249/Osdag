@@ -19,7 +19,7 @@ from osdag_core.utils.plugin_manager import PluginMetaData
 
 
 class Worker(QObject):
-    finished = Signal(bool)
+    finished = Signal(bool, str)
 
     def __init__(self, func, *args, **kwargs):
         super().__init__()
@@ -29,19 +29,21 @@ class Worker(QObject):
 
     @Slot()
     def run(self):
-        import threading
         try:
             result = self.func(*self.args, **self.kwargs)
-            self.finished.emit(bool(result))
-        except Exception as e:
-            print(f"[WORKER] Exception: {e}")
-            self.finished.emit(False)
+            success, error = result
 
+            self.finished.emit(success, error or "")
+
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.finished.emit(False, "Worker execution failed")
 
 class PluginWidget(QWidget):
     download = Signal(PluginMetaData)
     delete = Signal(PluginMetaData)
-    update = Signal(PluginMetaData)
+    update_plugin = Signal(PluginMetaData)
 
     def __init__(self, plugin: PluginMetaData, parent=None):
         super().__init__(parent)
@@ -204,7 +206,7 @@ class PluginWidget(QWidget):
         self.delete.emit(self.plugin)
 
     def _emit_update(self):
-        self.update.emit(self.plugin)
+        self.update_plugin.emit(self.plugin)
 
     def set_status(self, status=""):
         self.status_label.setText(f"({status})" if status else "")
@@ -263,19 +265,30 @@ class PluginWidget(QWidget):
 
         elif state == "error":
             self.set_status("Operation failed")
-            self.btnDownload.setVisible(True)
+            if self.btnDownload.isVisible():
+                self.btnDownload.setEnabled(True)
+            if self.btnUpdate.isVisible():
+                self.btnUpdate.setEnabled(True)
+            if self.btnDelete.isVisible():
+                self.btnDelete.setEnabled(True)
 
 class PluginStoreDialog(QDialog):
+    task_finished = Signal(bool, object, object, object, str)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.plugin_manager = QApplication.instance().plugin_manager
         self.plugin_manager_dialog = QApplication.instance().plugin_manager_dialog
         self.state_manager = self.plugin_manager.state_manager
-        self.channel = "zehen-249"
+        self.channel = "osdag-plugins"
         self.plugins: list[PluginMetaData] = self.plugin_manager.discover_online_plugins(
             channel=self.channel)
-        self.local_plugins: list[PluginMetaData] = self.state_manager.get_installed_plugins()
+        self.local_plugins: list[PluginMetaData] = self.plugin_manager.get_installed_plugins()
         self.updates_available = self._check_for_updates()
+        
+        self.plugin_store_threads = []
+        self.plugin_store_workers = []
+
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setObjectName("PluginStoreDialog")
@@ -474,7 +487,7 @@ class PluginStoreDialog(QDialog):
         self.okButton.setFixedHeight(30)
         self.okButton.setStyleSheet("""
             QPushButton { background-color: #90AF13; color: white; border: none; border-radius: 5px;
-                           padding: 5px 20px; font-size: 12px; font-weight: bold; }
+            padding: 5px 20px; font-size: 12px; font-weight: bold; }
             QPushButton:hover { background-color: #7A9611; }
             QPushButton:pressed { background-color: #6B850F; }
         """)
@@ -484,68 +497,102 @@ class PluginStoreDialog(QDialog):
         contentLayout.addLayout(buttonLayout)
         mainLayout.addWidget(contentWidget)
 
+        self.task_finished.connect(
+            self._handle_task_finished,
+            Qt.QueuedConnection
+        )
+
+
+    @Slot(bool, object, object, object, str)
+    def _handle_task_finished(
+        self, success, callback, widget, plugin, error
+    ):
+        callback(success, widget, plugin, error)
+
+    def run_plugin_task(
+        self,
+        func: callable,
+        state: str,
+        plugin: PluginMetaData,
+        widget: PluginWidget,
+        callback
+    ):
+        widget.set_state(state)
+
+        thread = QThread(self)
+        worker = Worker(func, plugin)
+
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+
+        worker.finished.connect(
+            lambda success, error: self.task_finished.emit(
+                success, callback, widget, plugin, error
+            )
+        )
+
+        worker.finished.connect(thread.quit)
+
+        # Keep the worker alive until the thread finishes.
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+
+        # Retain Python references.
+        self.plugin_store_threads.append(thread)
+        self.plugin_store_workers.append(worker)
+
+        thread.finished.connect(
+            lambda t=thread, w=worker: self._cleanup_plugin_task(t, w)
+        )
+
+        thread.start()
+
+    def _cleanup_plugin_task(self, thread, worker):
+        if thread in self.plugin_store_threads:
+            self.plugin_store_threads.remove(thread)
+
+        if worker in self.plugin_store_workers:
+            self.plugin_store_workers.remove(worker)
 
     def delete_plugin(self, plugin: PluginMetaData, widget: PluginWidget):
-        widget.set_state("deleting")
-        QApplication.processEvents()  # ensures repaint before thread starts
-
-        thread = QThread()
-        worker = Worker(self.plugin_manager.delete_plugin, plugin)
-        worker.moveToThread(thread)
-
-        # Connect signals
-        thread.started.connect(lambda: self.start_worker(worker))
-        worker.finished.connect(
-            lambda success: self._on_delete_finished(success, widget, plugin))
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-
-        # Keep a reference so thread isn’t Garbagecollected
-        if not hasattr(self, "plugin_store_threads"):
-            self.plugin_store_threads = []
-        self.plugin_store_threads.append(thread)
-        thread.finished.connect(
-            lambda: self.plugin_store_threads.remove(thread))
-        thread.start()
-
-    def _on_delete_finished(self, success, widget, plugin):
-        if success:
-            print(f"[INFO] Successfully deleted plugin: {plugin.name}")
-            self.plugin_manager.unregister_installed_plugin(plugin)
-            widget.set_state("available")
-        else:
-            print(f"[INFO] Failed to delete plugin: {plugin.name}")
-            widget.set_state("installed")
+        self.run_plugin_task(
+            self.plugin_manager.delete_plugin,
+            "deleting", plugin, widget,
+            self._on_delete_finished
+        )
 
     def download_plugin(self, plugin: PluginMetaData, widget: PluginWidget):
-        widget.set_state("downloading")
-        QApplication.processEvents()  # ensures repaint before thread starts
+        self.run_plugin_task(
+            self.plugin_manager.download_plugin,
+            "downloading", plugin, widget,
+            self._on_download_finished
+        )
 
-        thread = QThread()
-        worker = Worker(self.plugin_manager.download_plugin, plugin)
-        worker.moveToThread(thread)
+    def update_plugin(self, plugin: PluginMetaData, widget: PluginWidget):
+        self.run_plugin_task(
+            self.plugin_manager.update_plugin,
+            "updating", plugin, widget,
+            self._on_update_finished
+        )
 
-        # Connect signals
-        thread.started.connect(lambda: self.start_worker(worker))
-        worker.finished.connect(
-            lambda success: self._on_download_finished(success, widget, plugin))
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
+    def _on_delete_finished(self, success, widget, plugin, error=None):
+        if success:
+            print(f"[INFO] Successfully deleted plugin: {plugin.name}")
+            self.plugin_manager_dialog.deactivate_plugin(plugin)
+            self.plugin_manager.deactivate(plugin)
+            self.plugin_manager.unregister_installed_plugin(plugin)
+            self.plugin_manager_dialog.refresh_plugins()
+            widget.set_state("available")
+        else:
+            print(f"[ERROR] Failed to delete plugin: {plugin.name}")
+            print(f"{error}")
+            widget.set_state("installed")
 
-        # Keep a reference so thread isn’t Garbagecollected
-        if not hasattr(self, "plugin_store_threads"):
-            self.plugin_store_threads = []
-        self.plugin_store_threads.append(thread)
-        thread.finished.connect(
-            lambda: self.plugin_store_threads.remove(thread))
-        thread.start()
-
-    def _on_download_finished(self, success, widget, plugin):
+    def _on_download_finished(self, success, widget, plugin, error=""):
         if success:
             print(f"[INFO] Successfully downloaded plugin: {plugin.name}")
-            self.plugin_manager.register_installed_plugin(plugin)
+            self.plugin_manager._load_entry_point_plugins()
             widget.set_state("installed")
 
             # Activate by default
@@ -555,47 +602,30 @@ class PluginStoreDialog(QDialog):
 
         else:
             print(f"[INFO] Failed to download plugin: {plugin.name}")
-            widget.set_state("error")
+            print(f"{error}")
+            widget.set_state("available")
 
-    def update_plugin(self, plugin: PluginMetaData, widget: PluginWidget):
-        widget.set_state("updating")
-        QApplication.processEvents()  # ensures repaint before thread starts
-
-        thread = QThread()
-        worker = Worker(self.plugin_manager.update_plugin, plugin)
-        worker.moveToThread(thread)
-
-        # Connect signals
-        thread.started.connect(lambda: self.start_worker(worker))
-        worker.finished.connect(
-            lambda success: self._on_update_finished(success, widget, plugin))
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-
-        # Keep a reference so thread isn’t Garbagecollected
-        if not hasattr(self, "plugin_store_threads"):
-            self.plugin_store_threads = []
-        self.plugin_store_threads.append(thread)
-        thread.finished.connect(
-            lambda: self.plugin_store_threads.remove(thread))
-        thread.start()
-
-    def _on_update_finished(self, success, widget, plugin):
+    def _on_update_finished(self, success, widget, plugin, error=None):
         if success:
             print(f"[INFO] Successfully updated plugin: {plugin.name}")
+            installed_plugin = self.plugin_manager.get_plugin_by_name(plugin.name)
+            self.plugin_manager.unregister_installed_plugin(installed_plugin)  # Remove old state
+            
+            self.plugin_manager._load_entry_point_plugins()  # Reload plugins to get the updated version
+
+            self.plugin_manager_dialog.refresh_plugins()
             widget.set_state("installed")
         else:
             print(f"[INFO] Failed to update plugin: {plugin.name}")
-            widget.set_state("error")
+            print(f"{error}")
+            widget.set_state("installed")
 
-    def start_worker(self, worker):
-        QMetaObject.invokeMethod(worker, "run", Qt.QueuedConnection)
 
     def refresh_plugins(self):
         # Re-discover both local and online plugins
-        self.plugins = self.plugin_manager.discover_online_plugins(channel="zehen-249")
-        self.local_plugins = self.plugin_manager.discover_local_plugins()
+        # self.plugins = self.plugin_manager.discover_online_plugins(channel="zehen-249")
+        self.local_plugins = self.plugin_manager.state_manager.get_installed_plugins()
+        self.updates_available = self._check_for_updates()
 
         # Clear all plugin widgets from the layout
         for i in reversed(range(self.pluginLayout.count())):
@@ -606,7 +636,7 @@ class PluginStoreDialog(QDialog):
         # Rebuild plugin list widgets
         self._populate_plugins()
 
-    def _populate_plugins(self):
+    def _populate_plugins(self) -> None:
 
         def safe_parse_version(ver_string):
             """Safely parse version, returning 0.0.0 for invalid versions."""
@@ -632,7 +662,7 @@ class PluginStoreDialog(QDialog):
                 lambda plugin, w=pw: self.download_plugin(plugin, w))
             pw.delete.connect(
                 lambda plugin, w=pw: self.delete_plugin(plugin, w))
-            pw.update.connect(
+            pw.update_plugin.connect(
                 lambda plugin, w=pw: self.update_plugin(plugin, w))
 
             pw.setMinimumHeight(90)
@@ -646,8 +676,7 @@ class PluginStoreDialog(QDialog):
                     up.name == plugin.name
                     for up in self.updates_available
                 )
-
-                if self.plugin_manager.is_registered(plugin.id):
+                if self.plugin_manager.is_registered(plugin):
                     pw.set_state("installed")
 
                 if is_update_available:
@@ -660,37 +689,29 @@ class PluginStoreDialog(QDialog):
 
             self.pluginLayout.addWidget(pw)
 
-    def _check_for_updates(self):
-        installed_plugins = self.plugin_manager.discover_local_plugins()
-        online_plugins = self.plugin_manager.discover_online_plugins(
-            channel=self.channel)
+    def _check_for_updates(self) -> list[PluginMetaData]:
 
-        online_by_name = {plugin.name: plugin for plugin in online_plugins}
+        online_by_name = {p.name: p for p in self.plugins}
+
         updates_available = []
-        for installed in installed_plugins:
+        for installed in self.local_plugins:
             online = online_by_name.get(installed.name)
 
-            if online is None:
-                continue
-
             try:
-                if version.parse(online.version) > version.parse(installed.version):
+                if online and version.parse(online.version) > version.parse(installed.version):
                     updates_available.append(online)
-            except Exception:
-                # If version parsing fails, skip this comparison
-                pass
+            except Exception as e:
+                print(f"[WARN] Error checking update for {installed.name}: {e}")
 
         return updates_available
 
     def closeEvent(self, event):
         self.plugin_manager.state_manager.flush()
-        self._refreshManager()
+        self.plugin_manager_dialog.refresh_plugins()
         super().closeEvent(event)
 
     def okClicked(self):
         self.plugin_manager.state_manager.flush()
-        self._refreshManager()
+        self.plugin_manager_dialog.refresh_plugins()
         self.accept()
 
-    def _refreshManager(self):
-        self.plugin_manager_dialog.refresh_plugins()
