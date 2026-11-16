@@ -40,7 +40,7 @@ channels:
 
 specs:
   - python 3.12
-  # - osdag =={{app_version}}
+  - osdag =={{app_version}}
 
 # Add in system env variables
 initialize_conda: false
