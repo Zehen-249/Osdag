@@ -39,6 +39,9 @@ build:
   # Add the line "skip: True  # [py<35]" (for example) to limit to Python 3.5 and newer, or "skip: True  # [not win]" to limit to Windows.
   # More info about selectors can be found in the conda-build docs:
   # https://docs.conda.io/projects/conda-build/en/latest/resources/define-metadata.html#preprocessing-selectors
+  
+  script_env:
+    - SETUPTOOLS_SCM_PRETEND_VERSION={{ app_version }}
   script: {{ PYTHON }} -m pip install --no-deps --force-reinstall . -vv
   entry_points:
     - osdag = osdag_gui.__main__:main
@@ -47,14 +50,14 @@ requirements:
   build:
     # If your project compiles code (such as a C extension) then add the required compilers as separate entries here.
     # Compilers are named 'c', 'cxx' and 'fortran'.
-    - setuptools
-    - wheel
   
   host:
     - python {{ python }}
-    - setuptools
+    - setuptools >=77
+    - setuptools-scm >=8
     - wheel
     - pip
+
   run:
     - python
     - numpy
