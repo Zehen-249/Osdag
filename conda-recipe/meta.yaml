@@ -8,7 +8,7 @@
 
 {% set name = "Osdag" %}
 {% set branch = "dev" %}
-{% set app_version = (environ.get('GIT_DESCRIBE_TAG', '0.0.0')).lstrip('v') %}
+{% set app_version = (environ.get('GIT_DESCRIBE_TAG')).lstrip('v') %}
 
 package:
   name: {{ name|lower }}
@@ -24,7 +24,7 @@ source:
   # You may need the openssl package, available on conda-forge:
   #  `conda install openssl -c conda-forge``
 
-  git_url: https://github.com/osdag-admin/{{ name }}.git
+  git_url: https://github.com/zehen-249/osdag.git
   git_rev: {{ version }}
   git_depth: 1  # Only clone the latest commit, which is usually enough for building a package. This can speed up the cloning process and reduce disk space usage.
   # path: .. # Use this if the source code is already on your local machine, and you don't want to upload it to GitHub or other hosting service. The path is relative to the location of the meta.yaml file.
