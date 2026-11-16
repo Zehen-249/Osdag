@@ -12,6 +12,15 @@ namespaces = true
 where = ["src"]
 include = ["osdag_core*", "osdag_gui*"]
 
+[tool.setuptools.package-data]
+"osdag_core.data.doc" = ["**/*.MD", "**/*.md", "**/*.TXT", "**/*.txt"]
+"osdag_core.data.ResourceFiles.images" = ["**/*.png", "**/*.PNG", "**/*.jpg", "**/*.JPG", "**/*.jpeg", "**/*.JPEG"]
+"osdag_core.data.ResourceFiles.Database" = ["*"]
+"osdag_gui.resources" = [
+    "**/*.png", "**/*.PNG", "**/*.jpg", "**/*.JPG", "**/*.jpeg", "**/*.JPEG", "**/*.svg",
+    "**/*.qss", "**/*.ttf", "**/*.qrc"
+]
+
 
 [project]
 name = "osdag"

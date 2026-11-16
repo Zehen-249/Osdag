@@ -11,18 +11,22 @@ installer_type: exe # [win]
 installer_type: sh  # [linux]
 
 icon_image: Osdag.ico
+welcome_image: "OSDAG welcome.png"
+header_image: "OSDAG header.png"
 welcome_text: |
   Welcome to the osdag Installer.
   This will install osdag with all required runtime components.
 
 license_file: license.txt
 extra_files:
+  - Osdag.ico
+  - "OSDAG header.png"
+  - "OSDAG welcome.png"
   - post_install.bat  # [win]
   - pre_uninstall.bat # [win]
   - launch_osdag.vbs  # [win]
   - post_install.sh   # [linux]
   - Uninstall-osdag.sh  # [linux]
-  - Osdag.ico
   - create_shortcuts.ps1  # [win]
   - remove_shortcuts.ps1  # [win]
 
@@ -36,7 +40,7 @@ channels:
 
 specs:
   - python 3.12
-  - osdag =={{app_version}}
+  # - osdag =={{app_version}}
 
 # Add in system env variables
 initialize_conda: false
